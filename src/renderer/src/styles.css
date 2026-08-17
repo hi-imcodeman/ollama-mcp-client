@@ -19,6 +19,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Custom window chrome — drag the header to move the window */
+.titlebar-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Room for macOS traffic lights in the sidebar brand strip */
+body.platform-darwin .titlebar-traffic-pad {
+  padding-top: 2.25rem;
+}
+
+/* Room for Windows title-bar overlay controls on the right */
+body.platform-win32 .titlebar-overlay-pad {
+  padding-right: 8.5rem;
+}
+
 button,
 a,
 select,

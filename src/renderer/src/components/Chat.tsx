@@ -337,7 +337,7 @@ export function Chat({
 
   return (
     <main className="flex min-w-0 flex-1 flex-col">
-      <header className="flex items-center justify-between border-b border-[#243041] px-5 py-3">
+      <header className="titlebar-drag titlebar-overlay-pad flex items-center justify-between border-b border-[#243041] px-5 py-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-medium text-[#f0f4f8]">
             Chat
@@ -348,11 +348,21 @@ export function Chat({
               </span>
             )}
           </div>
-          <div className="text-xs text-[#8b9aab]">
-            {ollamaOk ? 'Ollama connected' : 'Ollama offline'}
+          <div
+            className={`flex items-center gap-1.5 text-xs ${
+              ollamaOk ? 'text-emerald-400/90' : 'text-rose-300/90'
+            }`}
+          >
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                ollamaOk ? 'bg-emerald-400' : 'bg-rose-400'
+              }`}
+              aria-hidden
+            />
+            {ollamaOk ? 'Connected' : 'Disconnected'}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="titlebar-no-drag flex gap-2">
           {busy && (
             <button
               type="button"

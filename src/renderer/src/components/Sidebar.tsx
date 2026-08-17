@@ -1,4 +1,5 @@
 import type { ChatSession } from '../../../shared/types'
+import appIcon from '../assets/icon-128.png'
 
 interface SidebarProps {
   sessions: ChatSession[]
@@ -39,15 +40,29 @@ export function Sidebar({
 }: SidebarProps): React.JSX.Element {
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-[#243041] bg-[#121820]">
-      <div className="border-b border-[#243041] px-4 py-4">
-        <h1 className="text-lg font-semibold tracking-tight text-[#f0f4f8]">
-          Ollama MCP
-        </h1>
-        <p className="mt-0.5 text-xs text-[#8b9aab]">Local models + MCP tools</p>
+      <div className="titlebar-drag titlebar-traffic-pad border-b border-[#243041] px-4 pb-4 pt-3">
+        <div className="flex items-center gap-3">
+          <img
+            src={appIcon}
+            alt=""
+            width={44}
+            height={44}
+            draggable={false}
+            className="h-11 w-11 shrink-0 rounded-[10px] shadow-sm shadow-black/30"
+          />
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold tracking-tight text-[#f0f4f8]">
+              Ollama MCP
+            </h1>
+            <p className="mt-0.5 truncate text-xs text-[#8b9aab]">
+              Local models + MCP tools
+            </p>
+          </div>
+        </div>
         <button
           type="button"
           onClick={onNewSession}
-          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#2d6cb5] px-3 py-2 text-sm font-medium text-white hover:bg-[#3a7cc9]"
+          className="titlebar-no-drag mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#2d6cb5] px-3 py-2 text-sm font-medium text-white hover:bg-[#3a7cc9]"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
             <path
@@ -62,7 +77,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onOpenModels}
-          className={`mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+          className={`titlebar-no-drag mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
             view === 'models'
               ? 'border-[#2d6cb5]/50 bg-[#1a3050] text-[#9ec5f0]'
               : 'border-[#2a3a4d] bg-[#0f1419] text-[#e7ecf1] hover:bg-[#1a2430]'
@@ -73,7 +88,7 @@ export function Sidebar({
         <button
           type="button"
           onClick={onOpenMcp}
-          className={`mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+          className={`titlebar-no-drag mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition ${
             view === 'mcp'
               ? 'border-[#2d6cb5]/50 bg-[#1a3050] text-[#9ec5f0]'
               : 'border-[#2a3a4d] bg-[#0f1419] text-[#e7ecf1] hover:bg-[#1a2430]'

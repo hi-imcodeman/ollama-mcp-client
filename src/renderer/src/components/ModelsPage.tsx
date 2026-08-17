@@ -520,14 +520,14 @@ export function ModelsPage({
 
   return (
     <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-      <header className="flex items-center justify-between border-b border-[#243041] px-5 py-4">
+      <header className="titlebar-drag titlebar-overlay-pad flex items-center justify-between border-b border-[#243041] px-5 py-4">
         <div>
           <h2 className="text-lg font-semibold text-[#f0f4f8]">Models</h2>
           <p className="text-xs text-[#8b9aab]">
             Manage installed models and browse the Ollama library
           </p>
         </div>
-        <div className="flex gap-1 rounded-lg border border-[#2a3a4d] bg-[#121820] p-0.5">
+        <div className="titlebar-no-drag flex gap-1 rounded-lg border border-[#2a3a4d] bg-[#121820] p-0.5">
           {(['installed', 'library'] as const).map((id) => (
             <button
               key={id}

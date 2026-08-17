@@ -19,6 +19,7 @@ import type {
 export type ServerWithStatus = McpServerConfig & { connected: boolean }
 
 const api = {
+  platform: process.platform as NodeJS.Platform,
   getConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:get'),
   setShowThinking: (enabled: boolean): Promise<boolean> =>
     ipcRenderer.invoke('config:setShowThinking', enabled),

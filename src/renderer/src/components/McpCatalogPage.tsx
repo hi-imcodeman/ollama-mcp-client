@@ -164,7 +164,7 @@ export function McpCatalogPage({
 
   return (
     <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <header className="shrink-0 border-b border-[#243041] px-6 py-4">
+      <header className="titlebar-drag titlebar-overlay-pad shrink-0 border-b border-[#243041] px-6 py-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-[#f0f4f8]">MCP Servers</h2>
@@ -172,7 +172,7 @@ export function McpCatalogPage({
               Manage connected servers and browse the catalog.
             </p>
           </div>
-          <div className="flex gap-1 rounded-lg border border-[#2a3a4d] bg-[#121820] p-0.5">
+          <div className="titlebar-no-drag flex gap-1 rounded-lg border border-[#2a3a4d] bg-[#121820] p-0.5">
             <button
               type="button"
               onClick={() => setTab('mine')}

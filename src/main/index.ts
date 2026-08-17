@@ -36,6 +36,21 @@ function createWindow(): void {
     show: false,
     title: 'Ollama MCP',
     ...(iconPath ? { icon: iconPath } : {}),
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 14, y: 16 }
+        }
+      : process.platform === 'win32'
+        ? {
+            titleBarStyle: 'hidden' as const,
+            titleBarOverlay: {
+              color: '#121820',
+              symbolColor: '#c5d0dc',
+              height: 40
+            }
+          }
+        : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
