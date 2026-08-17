@@ -1,17 +1,20 @@
 {
   "name": "ollama-mcp-client",
+  "productName": "Ollama MCP",
   "version": "0.1.0",
-  "description": "Electron app to chat with Ollama models using MCP server tools",
+  "description": "Chat with Ollama models using MCP server tools",
   "main": "./out/main/index.js",
-  "author": "ollama-mcp-client",
+  "author": "Ollama MCP",
   "license": "MIT",
   "scripts": {
-    "dev": "electron-vite dev",
+    "postinstall": "node scripts/patch-electron-app.mjs",
+    "dev": "npm run postinstall && electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web"
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "patch:electron": "node scripts/patch-electron-app.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

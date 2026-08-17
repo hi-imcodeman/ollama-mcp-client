@@ -78,9 +78,23 @@ export function Chat({
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const clearProgrammaticScroll = (): void => {
+    programmaticScrollRef.current = false
+    if (scrollTimeoutRef.current != null) {
+      window.clearTimeout(scrollTimeoutRef.current)
+      scrollTimeoutRef.current = null
+    }
+  }
+
+  /** User scrolled away — stop auto-follow so streaming does not yank them back. */
+  const releaseStickToBottom = (): void => {
+    stickToBottomRef.current = false
+    clearProgrammaticScroll()
+  }
+
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth'): void => {
     const el = scrollRef.current
-    if (!el) return
+    if (!el || !stickToBottomRef.current) return
     programmaticScrollRef.current = true
     if (scrollTimeoutRef.current != null) {
       window.clearTimeout(scrollTimeoutRef.current)
@@ -90,6 +104,10 @@ export function Chat({
       el.scrollTop = el.scrollHeight
       // Allow layout to settle (image-gen frame / markdown reflow)
       requestAnimationFrame(() => {
+        if (!stickToBottomRef.current) {
+          programmaticScrollRef.current = false
+          return
+        }
         const node = scrollRef.current
         if (node) node.scrollTop = node.scrollHeight
         programmaticScrollRef.current = false
@@ -183,11 +201,38 @@ export function Chat({
   ])
 
   const onMessagesScroll = (): void => {
-    if (programmaticScrollRef.current) return
     const el = scrollRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    stickToBottomRef.current = distanceFromBottom < 80
+    const nearBottom = distanceFromBottom < 80
+    // While we are auto-scrolling, still honor a user override that left the bottom.
+    if (programmaticScrollRef.current) {
+      if (!nearBottom) releaseStickToBottom()
+      return
+    }
+    stickToBottomRef.current = nearBottom
+  }
+
+  const onMessagesWheel = (e: React.WheelEvent<HTMLDivElement>): void => {
+    // deltaY < 0 = user scrolling toward earlier messages. Detach before
+    // scrollTop updates, otherwise the next stream chunk re-pins instantly.
+    if (e.deltaY < 0) releaseStickToBottom()
+  }
+
+  const onMessagesTouchMove = (): void => {
+    // Finger drag: release; onScroll re-sticks if they are still at the bottom.
+    releaseStickToBottom()
+  }
+
+  const onMessagesKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (
+      e.key === 'PageUp' ||
+      e.key === 'Home' ||
+      e.key === 'ArrowUp' ||
+      (e.key === ' ' && e.shiftKey)
+    ) {
+      releaseStickToBottom()
+    }
   }
 
   useEffect(() => {
@@ -346,7 +391,11 @@ export function Chat({
       <div
         ref={scrollRef}
         onScroll={onMessagesScroll}
-        className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
+        onWheel={onMessagesWheel}
+        onTouchMove={onMessagesTouchMove}
+        onKeyDown={onMessagesKeyDown}
+        tabIndex={-1}
+        className="flex-1 space-y-3 overflow-y-auto px-5 py-4 outline-none"
       >
         {messages.length === 0 && !busy && (
           <div className="mx-auto mt-16 max-w-md text-center text-sm text-[#6b7a8c]">
