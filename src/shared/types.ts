@@ -226,6 +226,8 @@ export interface ChatSendPayload {
   messages: ChatMessage[]
   /** Client-generated id so the UI can ignore stale events from aborted turns. */
   turnId: string
+  /** Last Ollama prompt+eval count from this session (drives compaction). */
+  contextUsed?: number
 }
 
 export type UiMessage =

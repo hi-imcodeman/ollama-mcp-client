@@ -1,5 +1,8 @@
 /** Architecture max (e.g. llama.context_length = 131072) is not the live window. */
 
+/** Ollama's documented default when no num_ctx / app slider / env is set. */
+export const OLLAMA_DEFAULT_NUM_CTX = 4096
+
 function positiveInt(value: unknown): number | undefined {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n) || n <= 0) return undefined
@@ -36,20 +39,29 @@ export function parseNumCtx(
 }
 
 /**
- * Ollama's actual window is PARAMETER num_ctx (or the server default),
- * not the model's trained maximum. Prefer num_ctx; cap by architecture max.
+ * Live window is the minimum of Ollama's configured context (app slider,
+ * OLLAMA_CONTEXT_LENGTH, Modelfile num_ctx, or the 4k default) and the
+ * model's architecture maximum. Never treat the architecture max as the
+ * configured window.
  */
 export function parseContextLength(
   modelInfo?: Record<string, unknown> | null,
   parameters?: string | null,
   modelfile?: string | null,
-  runningContext?: number | null
+  runningContext?: number | null,
+  serverContext?: number | null
 ): number | undefined {
   const archMax = parseArchitectureContextMax(modelInfo)
   const numCtx = parseNumCtx(parameters, modelfile)
-  const running = runningContext && runningContext > 0 ? runningContext : undefined
-  const preferred = numCtx ?? running ?? archMax
-  if (!preferred) return undefined
-  if (archMax) return Math.min(preferred, archMax)
-  return preferred
+  const server = positiveInt(serverContext)
+  let running = positiveInt(runningContext)
+  // /api/ps context_length is often the architecture max, not num_ctx.
+  if (running && archMax && running >= archMax && !numCtx) {
+    running = undefined
+  }
+
+  const configured =
+    numCtx ?? running ?? server ?? OLLAMA_DEFAULT_NUM_CTX
+  if (archMax) return Math.min(configured, archMax)
+  return configured
 }

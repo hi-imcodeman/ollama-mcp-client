@@ -6,9 +6,8 @@ import { chatOnce } from './ollama'
 export const COMPACT_THRESHOLD = 0.75
 /** Leave roughly this fraction free for the reply + tools after compact. */
 const TARGET_HEADROOM = 0.25
-const MIN_MESSAGES_TO_COMPACT = 6
-const DEFAULT_KEEP_TURNS = 6
-const MIN_KEEP_TURNS = 2
+/** On a small window, keep only the latest user turn verbatim. */
+const DEFAULT_KEEP_TURNS = 1
 const SUMMARY_PREFIX = 'Conversation summary (earlier messages compacted):\n\n'
 
 export function isSummaryMessage(m: ChatMessage): boolean {
@@ -18,16 +17,28 @@ export function isSummaryMessage(m: ChatMessage): boolean {
   )
 }
 
+export function estimatedContextUsed(
+  messages: ChatMessage[],
+  extraTokens = 0,
+  measuredUsed?: number | null
+): number {
+  return Math.max(
+    estimateChatMessagesTokens(messages) + extraTokens,
+    measuredUsed ?? 0
+  )
+}
+
 export function shouldCompact(
   messages: ChatMessage[],
   limit: number | undefined,
-  measuredUsed?: number | null
+  measuredUsed?: number | null,
+  extraTokens = 0
 ): boolean {
   if (!limit || limit <= 0) return false
-  if (messages.length < MIN_MESSAGES_TO_COMPACT) return false
-  const estimated = estimateChatMessagesTokens(messages)
-  const used = Math.max(estimated, measuredUsed ?? 0)
-  return used >= limit * COMPACT_THRESHOLD
+  const used = estimatedContextUsed(messages, extraTokens, measuredUsed)
+  if (used < limit * COMPACT_THRESHOLD) return false
+  // Need something besides the last user prompt to fold into a summary.
+  return splitKeepingLastUser(messages).older.length > 0
 }
 
 /**
@@ -45,22 +56,35 @@ export function splitForCompact(
     if (messages[i].role === 'user') turnStarts.push(i)
   }
 
-  if (turnStarts.length <= keepTurns) {
-    // Not enough user turns — keep a message-count tail instead
-    const keepCount = Math.max(4, Math.min(messages.length - 2, messages.length))
-    if (keepCount >= messages.length) {
-      return { older: [], recent: messages }
-    }
+  // Always leave at least one earlier turn to summarize when possible.
+  if (turnStarts.length >= 2) {
+    const keep = Math.max(1, Math.min(keepTurns, turnStarts.length - 1))
+    const startIdx = turnStarts[turnStarts.length - keep]
     return {
-      older: messages.slice(0, messages.length - keepCount),
-      recent: messages.slice(messages.length - keepCount)
+      older: messages.slice(0, startIdx),
+      recent: messages.slice(startIdx)
     }
   }
 
-  const startIdx = turnStarts[turnStarts.length - keepTurns]
+  return { older: [], recent: messages }
+}
+
+/** Keep only the last user prompt; fold summary, tools, and the latest reply. */
+export function splitKeepingLastUser(messages: ChatMessage[]): {
+  older: ChatMessage[]
+  recent: ChatMessage[]
+} {
+  let lastUserIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user' && !isSummaryMessage(messages[i])) {
+      lastUserIdx = i
+      break
+    }
+  }
+  if (lastUserIdx < 0) return { older: [], recent: messages }
   return {
-    older: messages.slice(0, startIdx),
-    recent: messages.slice(startIdx)
+    older: messages.filter((_, i) => i !== lastUserIdx),
+    recent: [messages[lastUserIdx]]
   }
 }
 
@@ -103,11 +127,14 @@ export async function summarizeHistory(options: {
   model: string
   older: ChatMessage[]
   signal?: AbortSignal
+  numCtx?: number
 }): Promise<string> {
   const transcript = formatMessagesForSummary(options.older)
   const content = await chatOnce({
     model: options.model,
     signal: options.signal,
+    numCtx: options.numCtx,
+    numPredict: 512,
     messages: [
       {
         role: 'system',
@@ -166,42 +193,30 @@ export async function compactIfNeeded(options: {
   messages: ChatMessage[]
   limit: number | undefined
   measuredUsed?: number | null
+  extraTokens?: number
   signal?: AbortSignal
 }): Promise<CompactResult> {
   const { model, limit, measuredUsed, signal } = options
+  const extraTokens = options.extraTokens ?? 0
   const messages = options.messages
 
-  if (!shouldCompact(messages, limit, measuredUsed) || !limit) {
+  if (!shouldCompact(messages, limit, measuredUsed, extraTokens) || !limit) {
     return { messages, summarized: false }
   }
 
-  // Avoid re-summarizing if we only have a summary + short recent tail
-  const nonSummary = messages.filter((m) => !isSummaryMessage(m))
-  if (nonSummary.length < MIN_MESSAGES_TO_COMPACT) {
-    const trimmed = truncateOldest(messages, limit)
-    return {
-      messages: trimmed,
-      summarized: trimmed.length < messages.length
-    }
-  }
-
-  let keepTurns = DEFAULT_KEEP_TURNS
-  let older: ChatMessage[] = []
-  let recent: ChatMessage[] = messages
-
-  // Shrink keep-tail until older is non-empty and recent fits headroom budget
   const recentBudget = Math.floor(limit * (1 - TARGET_HEADROOM) * 0.7)
-  while (keepTurns >= MIN_KEEP_TURNS) {
-    ;({ older, recent } = splitForCompact(messages, keepTurns))
-    if (older.length === 0) {
-      return { messages, summarized: false }
-    }
-    if (estimateChatMessagesTokens(recent) <= recentBudget) break
-    keepTurns -= 1
+  let { older, recent } = splitForCompact(messages, DEFAULT_KEEP_TURNS)
+
+  const lastTurnTooBig =
+    estimateChatMessagesTokens(recent) + extraTokens > recentBudget
+  const olderIsOnlySummary =
+    older.length > 0 && older.every(isSummaryMessage)
+
+  if (older.length === 0 || lastTurnTooBig || olderIsOnlySummary) {
+    ;({ older, recent } = splitKeepingLastUser(messages))
   }
 
-  // If older is only an existing summary, fold by truncating instead
-  if (older.every(isSummaryMessage) && older.length <= 1) {
+  if (older.length === 0) {
     const trimmed = truncateOldest(messages, limit)
     return {
       messages: trimmed,
@@ -210,14 +225,18 @@ export async function compactIfNeeded(options: {
   }
 
   try {
-    const summary = await summarizeHistory({ model, older, signal })
+    const summary = await summarizeHistory({
+      model,
+      older,
+      signal,
+      numCtx: limit
+    })
     if (signal?.aborted) {
       return { messages, summarized: false }
     }
     let compacted: ChatMessage[] = [makeSummaryMessage(summary), ...recent]
 
-    // Safety: still over limit → drop more from the front of recent
-    if (estimateChatMessagesTokens(compacted) > limit * COMPACT_THRESHOLD) {
+    if (estimatedContextUsed(compacted, extraTokens) > limit * COMPACT_THRESHOLD) {
       compacted = truncateOldest(compacted, limit)
     }
 

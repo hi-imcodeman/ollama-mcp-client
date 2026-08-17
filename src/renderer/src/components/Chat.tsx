@@ -764,7 +764,7 @@ function ContextMeter({
   return (
     <div
       className="pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-11rem)] items-center gap-2"
-      title="Tokens in this chat vs Ollama’s num_ctx for this model (not the architecture maximum). After a reply, the value comes from the loaded model."
+      title="Tokens that will be sent on the next prompt vs the live window (min of Ollama’s context setting and the model maximum)."
     >
       <div className="h-1 w-14 overflow-hidden rounded-full bg-[#2a313a]">
         <div

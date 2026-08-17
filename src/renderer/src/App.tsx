@@ -329,10 +329,16 @@ export default function App(): React.JSX.Element {
         if (!stillCurrent()) return
         endBusy()
         if (event.content) {
-          historyRef.current = [
-            ...historyRef.current,
-            { role: 'assistant', content: event.content }
-          ]
+          const last = historyRef.current[historyRef.current.length - 1]
+          if (
+            last?.role !== 'assistant' ||
+            last.content !== event.content
+          ) {
+            historyRef.current = [
+              ...historyRef.current,
+              { role: 'assistant', content: event.content }
+            ]
+          }
         }
         const historySnapshot = historyRef.current
         const responseMs =
@@ -623,7 +629,8 @@ export default function App(): React.JSX.Element {
     await window.api.chat.send({
       model: selectedModel,
       messages: nextHistory,
-      turnId
+      turnId,
+      contextUsed: contextUsage?.used
     })
   }
 

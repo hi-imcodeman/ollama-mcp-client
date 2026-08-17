@@ -2,9 +2,10 @@
  * Models often indent reasoning/lists with 4+ spaces. CommonMark treats that as
  * a code block, so bullets show up as literal "* …" in a monospace box.
  * Also sanitize currency symbols inside $math$ that KaTeX cannot render (e.g. ₹).
+ * llama.cpp byte-fallback tokens (`<0xF0><0x9F>…`) are decoded to UTF-8.
  */
 export function normalizeMarkdown(source: string): string {
-  const text = source.replace(/\r\n/g, '\n')
+  const text = decodeByteFallbackTokens(source.replace(/\r\n/g, '\n'))
   if (!text.trim()) return source
 
   const lines = text.split('\n')
@@ -38,6 +39,38 @@ const MATH_CURRENCY_REPLACEMENTS: Array<[string, string]> = [
   ['£', '\\pounds'],
   ['¥', '\\yen']
 ]
+
+const BYTE_FALLBACK_RUN = /(?:<0x[0-9A-Fa-f]{2}>)+/g
+const BYTE_FALLBACK_BYTE = /<0x([0-9A-Fa-f]{2})>/gi
+
+/**
+ * llama.cpp emits unknown UTF-8 as hex tokens instead of the character.
+ * Decode consecutive runs; leave incomplete trailing bytes as-is for streaming.
+ */
+function decodeByteFallbackTokens(source: string): string {
+  return source.replace(BYTE_FALLBACK_RUN, (run) => {
+    const bytes = [...run.matchAll(BYTE_FALLBACK_BYTE)].map((m) =>
+      parseInt(m[1], 16)
+    )
+    const decoder = new TextDecoder('utf-8', { fatal: true })
+    let validLen = bytes.length
+    while (validLen > 0) {
+      try {
+        const decoded = decoder.decode(new Uint8Array(bytes.slice(0, validLen)))
+        return decoded + formatByteTokens(bytes.slice(validLen))
+      } catch {
+        validLen -= 1
+      }
+    }
+    return run
+  })
+}
+
+function formatByteTokens(bytes: number[]): string {
+  return bytes
+    .map((b) => `<0x${b.toString(16).toUpperCase().padStart(2, '0')}>`)
+    .join('')
+}
 
 function sanitizeMathCurrency(source: string): string {
   let out = source.replace(/\$\$([\s\S]+?)\$\$/g, (_m, body: string) => {

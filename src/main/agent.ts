@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { BrowserWindow } from 'electron'
 import type { ChatEvent, ChatMessage, ChatSendPayload } from '../shared/types'
 import { compactIfNeeded, shouldCompact } from './context-compact'
+import { estimateChatMessagesTokens, estimateTokensFromChars } from '../shared/contextUsage'
 import { mcpManager } from './mcp-manager'
 import { generateImageBase64 } from './ollama-image'
 import {
@@ -18,6 +19,8 @@ import {
 const MAX_TOOL_ITERATIONS = 8
 /** Cap tool payloads sent back to the model; UI still gets the full result. */
 const MAX_TOOL_RESULT_CHARS = 24_000
+const MIN_NUM_PREDICT = 256
+const PREDICT_RESERVE = 64
 
 let activeAbort: AbortController | null = null
 let activeTurnId: string | null = null
@@ -53,6 +56,97 @@ function approxChars(messages: OllamaChatMessage[]): number {
 
 function shortTurnId(turnId?: string): string {
   return turnId ? turnId.slice(0, 8) : '—'
+}
+
+function estimateToolOverhead(tools: OllamaTool[]): number {
+  if (tools.length === 0) return 0
+  return estimateTokensFromChars(JSON.stringify(tools).length)
+}
+
+function estimatePromptTokens(
+  messages: OllamaChatMessage[],
+  toolOverhead: number
+): number {
+  return estimateTokensFromChars(approxChars(messages)) + toolOverhead
+}
+
+function replyNumPredict(
+  limit: number | undefined,
+  promptTokens: number
+): number | undefined {
+  if (!limit || limit <= 0) return undefined
+  return Math.max(MIN_NUM_PREDICT, limit - promptTokens - PREDICT_RESERVE)
+}
+
+function occupancyUsed(messages: ChatMessage[], extraTokens: number): number {
+  return estimateChatMessagesTokens(messages) + extraTokens
+}
+
+type EmitTurn = (event: Exclude<ChatEvent, { type: 'user' }>) => void
+
+async function applyCompact(options: {
+  model: string
+  messages: ChatMessage[]
+  limit: number | undefined
+  measuredUsed?: number | null
+  extraTokens: number
+  signal: AbortSignal
+  turnId: string
+  emitTurn: EmitTurn
+}): Promise<ChatMessage[]> {
+  const {
+    model,
+    messages,
+    limit,
+    measuredUsed,
+    extraTokens,
+    signal,
+    turnId,
+    emitTurn
+  } = options
+
+  if (!shouldCompact(messages, limit, measuredUsed, extraTokens)) {
+    return messages
+  }
+
+  emitTurn({
+    type: 'status',
+    phase: 'compacting',
+    detail: 'Compressing conversation…'
+  })
+
+  const compact = await compactIfNeeded({
+    model,
+    messages,
+    limit,
+    measuredUsed,
+    extraTokens,
+    signal
+  })
+
+  if (signal.aborted || activeTurnId !== turnId) {
+    return messages
+  }
+
+  if (!compact.summarized) return compact.messages
+
+  console.log(
+    `[agent] compacted id=${turnId.slice(0, 8)} before=${messages.length} after=${compact.messages.length}`
+  )
+  emitTurn({ type: 'compacted', messages: compact.messages })
+  if (compact.summary) {
+    emitTurn({
+      type: 'notice',
+      content: 'Summarized earlier chat',
+      summary: compact.summary
+    })
+  } else {
+    emitTurn({
+      type: 'notice',
+      content: 'Trimmed earlier chat to fit context'
+    })
+  }
+  return compact.messages
 }
 
 function truncateForModel(result: string): string {
@@ -169,43 +263,29 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   }
 
   // Compact older history when near the context window (model history only).
+  const toolOverhead = estimateToolOverhead(tools)
   let workingMessages = payload.messages
   try {
-    if (shouldCompact(workingMessages, contextLimit)) {
-      emitTurn({
-        type: 'status',
-        phase: 'compacting',
-        detail: 'Compressing conversation…'
-      })
-    }
-    const compact = await compactIfNeeded({
+    workingMessages = await applyCompact({
       model: payload.model,
       messages: workingMessages,
       limit: contextLimit,
-      signal: abort.signal
+      measuredUsed: payload.contextUsed,
+      extraTokens: toolOverhead,
+      signal: abort.signal,
+      turnId,
+      emitTurn
     })
     if (abort.signal.aborted || activeTurnId !== turnId) {
       emitTurn({ type: 'error', message: 'Aborted' })
       return
     }
-    if (compact.summarized) {
-      console.log(
-        `[agent] compacted id=${tid} before=${payload.messages.length} after=${compact.messages.length}`
-      )
-      workingMessages = compact.messages
-      emitTurn({ type: 'compacted', messages: workingMessages })
-      if (compact.summary) {
-        emitTurn({
-          type: 'notice',
-          content: 'Summarized earlier chat',
-          summary: compact.summary
-        })
-      } else {
-        emitTurn({
-          type: 'notice',
-          content: 'Trimmed earlier chat to fit context'
-        })
-      }
+    if (contextLimit) {
+      emitTurn({
+        type: 'context',
+        used: occupancyUsed(workingMessages, toolOverhead),
+        limit: contextLimit
+      })
     }
   } catch (err) {
     if (abort.signal.aborted || activeTurnId !== turnId) {
@@ -288,6 +368,11 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         messages,
         tools: tools.length > 0 ? tools : undefined,
         signal: abort.signal,
+        numCtx: contextLimit,
+        numPredict: replyNumPredict(
+          contextLimit,
+          estimatePromptTokens(messages, toolOverhead)
+        ),
         onChunk: (chunk) => {
           if (activeTurnId !== turnId) return
 
@@ -349,7 +434,9 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       }
 
       const finalContent = content || streamedContent
-      emitContext(promptEvalCount, evalCount)
+      if (toolCalls.length > 0) {
+        emitContext(promptEvalCount, evalCount)
+      }
       console.log(
         `[agent] iter=${iteration} stream-done +${ms(iterStartedAt)} id=${tid} contentChars=${finalContent.length} tools=${toolCalls.length}` +
           (firstThinkingAt != null
@@ -369,7 +456,46 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         console.log(
           `[agent] turn done id=${tid} total=${ms(turnStartedAt)} iterations=${iteration + 1}`
         )
+        const withReply: ChatMessage[] = finalContent
+          ? [...workingMessages, { role: 'assistant', content: finalContent }]
+          : workingMessages
+        const used = (promptEvalCount ?? 0) + (evalCount ?? 0)
         emitTurn({ type: 'assistant_done', content: finalContent })
+        try {
+          const compacted = await applyCompact({
+            model: payload.model,
+            messages: withReply,
+            limit: contextLimit,
+            measuredUsed: used,
+            extraTokens: toolOverhead,
+            signal: abort.signal,
+            turnId,
+            emitTurn
+          })
+          if (abort.signal.aborted || activeTurnId !== turnId) {
+            emitTurn({ type: 'error', message: 'Aborted' })
+            return
+          }
+          if (contextLimit) {
+            emitTurn({
+              type: 'context',
+              used: occupancyUsed(compacted, toolOverhead),
+              limit: contextLimit
+            })
+          }
+        } catch (err) {
+          console.warn(
+            '[agent] post-turn compact skipped:',
+            err instanceof Error ? err.message : err
+          )
+          if (contextLimit) {
+            emitTurn({
+              type: 'context',
+              used: occupancyUsed(withReply, toolOverhead),
+              limit: contextLimit
+            })
+          }
+        }
         return
       }
 

@@ -1,3 +1,7 @@
+import { execFileSync } from 'child_process'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import type {
   ChatMessage,
   OllamaModel,
@@ -293,6 +297,55 @@ export async function getRunningContextLength(
   }
 }
 
+function ollamaAppDbPath(): string {
+  switch (process.platform) {
+    case 'darwin':
+      return path.join(
+        os.homedir(),
+        'Library',
+        'Application Support',
+        'Ollama',
+        'db.sqlite'
+      )
+    case 'win32':
+      return path.join(
+        process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'),
+        'Ollama',
+        'db.sqlite'
+      )
+    default:
+      return path.join(os.homedir(), '.ollama', 'db.sqlite')
+  }
+}
+
+function readOllamaAppContextLength(): number | undefined {
+  const dbPath = ollamaAppDbPath()
+  if (!fs.existsSync(dbPath)) return undefined
+  try {
+    const out = execFileSync(
+      'sqlite3',
+      [dbPath, 'SELECT context_length FROM settings LIMIT 1;'],
+      { encoding: 'utf8', timeout: 1500 }
+    )
+    const n = Number.parseInt(out.trim(), 10)
+    return Number.isFinite(n) && n > 0 ? n : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function readEnvContextLength(): number | undefined {
+  const raw = process.env.OLLAMA_CONTEXT_LENGTH
+  if (!raw) return undefined
+  const n = Number.parseInt(raw, 10)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/** Context length from the Ollama app slider or OLLAMA_CONTEXT_LENGTH. */
+export function getOllamaServerContextLength(): number | undefined {
+  return readOllamaAppContextLength() ?? readEnvContextLength()
+}
+
 export async function resolveContextLength(
   model: string,
   info?: OllamaModelInfo | null
@@ -302,7 +355,8 @@ export async function resolveContextLength(
     info?.model_info,
     info?.parameters,
     info?.modelfile,
-    running
+    running,
+    getOllamaServerContextLength()
   )
 }
 
@@ -386,11 +440,25 @@ export function modelSupportsVision(
   return support !== 'no'
 }
 
+function ollamaRequestOptions(options: {
+  numCtx?: number
+  numPredict?: number
+}): Record<string, number> | undefined {
+  const out: Record<string, number> = {}
+  if (options.numCtx && options.numCtx > 0) out.num_ctx = options.numCtx
+  if (options.numPredict && options.numPredict > 0) {
+    out.num_predict = options.numPredict
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 export async function chatStream(options: {
   model: string
   messages: OllamaChatMessage[]
   tools?: OllamaTool[]
   signal?: AbortSignal
+  numCtx?: number
+  numPredict?: number
   onChunk: (chunk: OllamaChatChunk) => void
 }): Promise<{
   content: string
@@ -407,6 +475,8 @@ export async function chatStream(options: {
   if (options.tools && options.tools.length > 0) {
     body.tools = options.tools
   }
+  const requestOptions = ollamaRequestOptions(options)
+  if (requestOptions) body.options = requestOptions
 
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
@@ -500,15 +570,19 @@ export async function chatOnce(options: {
   model: string
   messages: OllamaChatMessage[]
   signal?: AbortSignal
+  numCtx?: number
+  numPredict?: number
 }): Promise<string> {
   const baseUrl = getOllamaBaseUrl()
+  const requestOptions = ollamaRequestOptions(options)
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: options.model,
       messages: options.messages,
-      stream: false
+      stream: false,
+      ...(requestOptions ? { options: requestOptions } : {})
     }),
     signal: options.signal
   })
@@ -609,7 +683,8 @@ export async function showModel(model: string): Promise<OllamaModelDetails> {
       data.model_info,
       data.parameters,
       data.modelfile,
-      await getRunningContextLength(model)
+      await getRunningContextLength(model),
+      getOllamaServerContextLength()
     )
   }
 }
