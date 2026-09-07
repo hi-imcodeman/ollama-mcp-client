@@ -30,8 +30,14 @@ export async function shouldOfferGenerateImageTool(
   selectedModel: string
 ): Promise<boolean> {
   const status = await getOllamaStatus()
+  if (!status.ok) return false
   if (status.imageGenSupported === false) return false
-  const models = await listModels()
+  let models
+  try {
+    models = await listModels()
+  } catch {
+    return false
+  }
   const selected = models.find((m) => m.name === selectedModel)
   if (modelIsImageGen(selectedModel, { capabilities: selected?.capabilities })) {
     return false

@@ -673,13 +673,18 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           })
           const gen = await runGenerateImageTool(tc.arguments, abort.signal)
           if (gen.ok) {
-            emitTurn({
-              type: 'assistant_images',
-              images: [gen.imageBase64],
-              mime: 'image/png'
-            })
-            ok = true
-            result = gen.message
+            if (abort.signal.aborted || activeTurnId !== turnId) {
+              ok = false
+              result = 'Aborted'
+            } else {
+              emitTurn({
+                type: 'assistant_images',
+                images: [gen.imageBase64],
+                mime: 'image/png'
+              })
+              ok = true
+              result = gen.message
+            }
           } else {
             ok = false
             result = gen.message
