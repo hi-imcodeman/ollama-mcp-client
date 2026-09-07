@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { TelegramStatus } from '../../../shared/types'
+import type { OllamaModel, TelegramStatus } from '../../../shared/types'
 
 interface SettingsProps {
   ollamaOk: boolean
@@ -7,6 +7,9 @@ interface SettingsProps {
   baseUrl: string
   showThinking: boolean
   maxToolIterations: number
+  defaultImageModel: string | null
+  models: OllamaModel[]
+  imageGenSupported: boolean
   telegramEnabled: boolean
   telegramAllowedUserIds: number[]
   telegramStatus: TelegramStatus
@@ -18,6 +21,7 @@ interface SettingsProps {
   onSetBaseUrl: (url: string) => void
   onSetShowThinking: (enabled: boolean) => void
   onSetMaxToolIterations: (value: number) => void
+  onSetDefaultImageModel: (model: string | null) => void
 }
 
 export function Settings({
@@ -26,6 +30,9 @@ export function Settings({
   baseUrl,
   showThinking,
   maxToolIterations,
+  defaultImageModel,
+  models,
+  imageGenSupported,
   telegramEnabled,
   telegramAllowedUserIds,
   telegramStatus,
@@ -36,8 +43,17 @@ export function Settings({
   onRefreshOllama,
   onSetBaseUrl,
   onSetShowThinking,
-  onSetMaxToolIterations
+  onSetMaxToolIterations,
+  onSetDefaultImageModel
 }: SettingsProps): React.JSX.Element {
+  const imageModels = models.filter(
+    (m) =>
+      m.tags?.some((t) => t.toLowerCase() === 'image') ||
+      m.capabilities?.some((c) => c.toLowerCase() === 'image') ||
+      /z-image|flux|sdxl|stable-diffusion|stable_diffusion|imagen|dreamshaper|animagine/i.test(
+        m.name
+      )
+  )
   const [urlDraft, setUrlDraft] = useState(baseUrl)
   const [showToken, setShowToken] = useState(false)
   const [tokenDraft, setTokenDraft] = useState(telegramTokenDraft)
@@ -237,6 +253,37 @@ export function Settings({
                 }}
                 className="w-24 rounded border border-[#2a3a4d] bg-[#121820] px-2 py-1.5 text-sm text-[#e7ecf1] outline-none focus:border-[#4a7ab0]"
               />
+            </label>
+            <label className="mt-3 block">
+              <span className="mb-1 block text-sm text-[#e7ecf1]">Default image model</span>
+              <span className="mb-2 block text-xs text-[#6b7a8c]">
+                Used when a chat model calls generate_image. Auto picks the first installed
+                image model.
+              </span>
+              {!imageGenSupported ? (
+                <p className="text-xs text-amber-300/90">
+                  This Ollama build does not support image generation.
+                </p>
+              ) : imageModels.length === 0 ? (
+                <p className="text-xs text-[#6b7a8c]">
+                  No image models installed — image generation disabled until you install one.
+                </p>
+              ) : (
+                <select
+                  value={defaultImageModel ?? ''}
+                  onChange={(e) =>
+                    onSetDefaultImageModel(e.target.value === '' ? null : e.target.value)
+                  }
+                  className="w-full rounded border border-[#2a3a4d] bg-[#121820] px-2 py-1.5 text-sm text-[#e7ecf1] outline-none focus:border-[#4a7ab0]"
+                >
+                  <option value="">Auto (first available)</option>
+                  {imageModels.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </label>
           </section>
         </div>

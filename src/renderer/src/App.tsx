@@ -73,6 +73,7 @@ export default function App(): React.JSX.Element {
   const [activity, setActivity] = useState<ActivityState>(IDLE_ACTIVITY)
   const [showThinking, setShowThinking] = useState(false)
   const [maxToolIterations, setMaxToolIterations] = useState(30)
+  const [defaultImageModel, setDefaultImageModel] = useState<string | null>(null)
   const [telegramEnabled, setTelegramEnabled] = useState(false)
   const [telegramAllowedUserIds, setTelegramAllowedUserIds] = useState<number[]>(
     []
@@ -361,6 +362,7 @@ export default function App(): React.JSX.Element {
       setShowThinking(Boolean(config.showThinking))
       showThinkingRef.current = Boolean(config.showThinking)
       setMaxToolIterations(config.maxToolIterations)
+      setDefaultImageModel(config.defaultImageModel ?? null)
       setTelegramEnabled(Boolean(config.telegramEnabled))
       setTelegramAllowedUserIds(config.telegramAllowedUserIds)
       setTelegramStatus(await window.api.telegram.getStatus())
@@ -1118,6 +1120,11 @@ export default function App(): React.JSX.Element {
     setMaxToolIterations(saved)
   }
 
+  const handleSetDefaultImageModel = async (model: string | null): Promise<void> => {
+    const saved = await window.api.setDefaultImageModel(model)
+    setDefaultImageModel(saved)
+  }
+
   const handleSetTelegramToken = async (token: string | null): Promise<void> => {
     const status = await window.api.telegram.setToken(token)
     setTelegramStatus(status)
@@ -1248,6 +1255,9 @@ export default function App(): React.JSX.Element {
             baseUrl={baseUrl}
             showThinking={showThinking}
             maxToolIterations={maxToolIterations}
+            defaultImageModel={defaultImageModel}
+            models={models}
+            imageGenSupported={imageGenSupported}
             telegramEnabled={telegramEnabled}
             telegramAllowedUserIds={telegramAllowedUserIds}
             telegramStatus={telegramStatus}
@@ -1261,6 +1271,7 @@ export default function App(): React.JSX.Element {
             onSetBaseUrl={(u) => void handleSetBaseUrl(u)}
             onSetShowThinking={(v) => void handleSetShowThinking(v)}
             onSetMaxToolIterations={(v) => void handleSetMaxToolIterations(v)}
+            onSetDefaultImageModel={(model) => void handleSetDefaultImageModel(model)}
           />
         </div>
       ) : null}
