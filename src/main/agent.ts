@@ -254,6 +254,9 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
     })
   }
   if (modelIsImageGen(payload.model, modelInfo)) {
+    console.log(
+      `[agent] turn start id=${tid} model=${payload.model} messages=${payload.messages.length} tools=0`
+    )
     const lastUser = [...payload.messages].reverse().find((m) => m.role === 'user')
     const prompt = (lastUser?.content ?? '').trim()
     if (!prompt) {
