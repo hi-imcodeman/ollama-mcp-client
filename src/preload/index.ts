@@ -37,6 +37,8 @@ const api = {
     ipcRenderer.invoke('config:setShowThinking', enabled),
   setMaxToolIterations: (value: number): Promise<number> =>
     ipcRenderer.invoke('config:setMaxToolIterations', value),
+  setDefaultImageModel: (model: string | null): Promise<string | null> =>
+    ipcRenderer.invoke('config:setDefaultImageModel', model),
 
   ollama: {
     getStatus: (): Promise<OllamaStatus> => ipcRenderer.invoke('ollama:getStatus'),

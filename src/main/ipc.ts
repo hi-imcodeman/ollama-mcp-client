@@ -37,6 +37,8 @@ import {
   setServerEnabled,
   setShowThinking,
   setMaxToolIterations,
+  getDefaultImageModel,
+  setDefaultImageModel,
   setTelegramAllowedUserIds,
   setTelegramBotToken,
   setTelegramEnabled,
@@ -109,6 +111,9 @@ export function registerIpc(ipcMain: IpcMain): void {
   ipcMain.handle('config:setMaxToolIterations', (_e, value: number) =>
     setMaxToolIterations(value)
   )
+  ipcMain.handle('config:setDefaultImageModel', (_e, model: string | null) =>
+    setDefaultImageModel(model)
+  )
 
   ipcMain.handle('ollama:getStatus', () => getOllamaStatus())
   ipcMain.handle('ollama:listModels', () => listModels())
@@ -118,6 +123,10 @@ export function registerIpc(ipcMain: IpcMain): void {
     const selected = getSelectedModel()
     if (selected === model) {
       setSelectedModel(null)
+    }
+    const defaultImage = getDefaultImageModel()
+    if (defaultImage === model) {
+      setDefaultImageModel(null)
     }
   })
   ipcMain.handle('ollama:pullModel', async (_e, model: string) => {
