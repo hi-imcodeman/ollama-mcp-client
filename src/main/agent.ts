@@ -8,6 +8,12 @@ import {
   estimateTokensFromChars,
   formatTokenCount
 } from '../shared/contextUsage'
+import {
+  GENERATE_IMAGE_NAME,
+  generateImageToolDefinition,
+  runGenerateImageTool,
+  shouldOfferGenerateImageTool
+} from './image-gen-tool'
 import { mcpManager } from './mcp-manager'
 import { generateImageBase64 } from './ollama-image'
 import {
@@ -226,14 +232,8 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
     emitTurn({ type: 'done' })
   }
 
-  const skillTool = loadSkillTool()
-  const tools = [...(skillTool ? [skillTool] : []), ...toolsFromMcp()]
   const turnStartedAt = Date.now()
   const tid = shortTurnId(turnId)
-
-  console.log(
-    `[agent] turn start id=${tid} model=${payload.model} messages=${payload.messages.length} tools=${tools.length}`
-  )
 
   emitTurn({
     type: 'status',
@@ -300,6 +300,17 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       return
     }
   }
+
+  const skillTool = loadSkillTool()
+  const baseTools = [...(skillTool ? [skillTool] : []), ...toolsFromMcp()]
+  const offerImageTool = await shouldOfferGenerateImageTool(payload.model)
+  const tools = offerImageTool
+    ? [...baseTools, generateImageToolDefinition()]
+    : baseTools
+
+  console.log(
+    `[agent] turn start id=${tid} model=${payload.model} messages=${payload.messages.length} tools=${tools.length}`
+  )
 
   // Compact older history when near the context window (model history only).
   const toolOverhead = estimateToolOverhead(tools)
@@ -647,10 +658,32 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
 
         console.log(`[agent] tool start id=${tid} name=${tc.name}`)
         const toolStartedAt = Date.now()
-        const { ok, result } =
-          tc.name === LOAD_SKILL_NAME
-            ? loadSkillByName(String(tc.arguments.name ?? ''))
-            : await mcpManager.callTool(tc.name, tc.arguments)
+        let ok: boolean
+        let result: string
+        if (tc.name === LOAD_SKILL_NAME) {
+          ;({ ok, result } = loadSkillByName(String(tc.arguments.name ?? '')))
+        } else if (tc.name === GENERATE_IMAGE_NAME) {
+          emitTurn({
+            type: 'status',
+            phase: 'generating',
+            detail: 'Generating image…'
+          })
+          const gen = await runGenerateImageTool(tc.arguments, abort.signal)
+          if (gen.ok) {
+            emitTurn({
+              type: 'assistant_images',
+              images: [gen.imageBase64],
+              mime: 'image/png'
+            })
+            ok = true
+            result = gen.message
+          } else {
+            ok = false
+            result = gen.message
+          }
+        } else {
+          ;({ ok, result } = await mcpManager.callTool(tc.name, tc.arguments))
+        }
         const modelResult = truncateForModel(result)
         console.log(
           `[agent] tool end id=${tid} name=${tc.name} ok=${ok} +${ms(toolStartedAt)} resultChars=${result.length}` +
