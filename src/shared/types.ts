@@ -45,6 +45,8 @@ export interface AppConfig {
   telegramEnabled: boolean
   telegramAllowedUserIds: number[]
   telegramMirrorMode: TelegramMirrorMode
+  /** Preferred image model for generate_image tool; null = Auto (first installed). */
+  defaultImageModel: string | null
 }
 
 export interface TelegramStatus {

@@ -21,7 +21,8 @@ const DEFAULT_CONFIG: AppConfig = {
   telegramBotToken: null,
   telegramEnabled: false,
   telegramAllowedUserIds: [],
-  telegramMirrorMode: 'full'
+  telegramMirrorMode: 'full',
+  defaultImageModel: null
 }
 
 interface StoreSchema extends AppConfig, SessionsState {
@@ -76,7 +77,8 @@ export function getConfig(): AppConfig {
     telegramMirrorMode: store.get(
       'telegramMirrorMode',
       DEFAULT_CONFIG.telegramMirrorMode
-    )
+    ),
+    defaultImageModel: store.get('defaultImageModel', DEFAULT_CONFIG.defaultImageModel)
   }
 }
 
@@ -163,6 +165,16 @@ export function getTelegramMirrorMode(): TelegramMirrorMode {
 export function setTelegramMirrorMode(mode: TelegramMirrorMode): TelegramMirrorMode {
   store.set('telegramMirrorMode', mode)
   return mode
+}
+
+export function getDefaultImageModel(): string | null {
+  return store.get('defaultImageModel', DEFAULT_CONFIG.defaultImageModel)
+}
+
+export function setDefaultImageModel(model: string | null): string | null {
+  const value = model && model.trim() ? model.trim() : null
+  store.set('defaultImageModel', value)
+  return value
 }
 
 export function addTelegramAllowedUserId(id: number): number[] {
