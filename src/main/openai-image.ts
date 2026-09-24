@@ -1,18 +1,10 @@
 import { getOpenaiApiKey } from './config-store'
 import { OPENAI_BASE, formatOpenAiError, parseOpenAiUsageFromJson, type OpenAiUsageDetails } from './openai-client'
+import { isOpenAiImageGenModel } from '../shared/openai-models'
 
 export interface OpenAiImageGenerateResult {
   b64: string
   usage?: OpenAiUsageDetails
-}
-
-/** GPT Image and similar models that generate images from text (not vision chat). */
-export function isOpenAiImageGenModel(model: string): boolean {
-  const lower = model.toLowerCase()
-  if (lower.startsWith('gpt-image')) return true
-  if (lower.startsWith('dall-e')) return true
-  if (/^gpt-[\d].*image/.test(lower)) return true
-  return false
 }
 
 function extractBase64FromResponsesBody(data: unknown): string | undefined {

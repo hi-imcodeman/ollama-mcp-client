@@ -1,7 +1,7 @@
 import type { OpenAiModelEntry } from '../shared/types'
+import { isOpenAiImageGenModel } from '../shared/openai-models'
 import type { OllamaChatMessage, OllamaTool } from './ollama'
 import { getOpenaiApiKey } from './config-store'
-import { isOpenAiImageGenModel } from './openai-image'
 
 export const OPENAI_BASE = 'https://api.openai.com/v1'
 

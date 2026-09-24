@@ -1,4 +1,10 @@
-import { getDefaultImageModel } from './config-store'
+import {
+  getDefaultImageModel,
+  getOpenaiModelEnabledMap,
+  getOpenaiModelsCatalog
+} from './config-store'
+import { isOpenAiImageGenModel } from '../shared/openai-models'
+import type { LlmProvider } from '../shared/types'
 import { generateImageBase64 } from './ollama-image'
 import {
   getOllamaStatus,
@@ -19,6 +25,25 @@ export function resolveDefaultImageModel(
   return imageModelNames[0] ?? null
 }
 
+export function resolveImageModelForProvider(
+  provider: LlmProvider,
+  configured: string | null,
+  availableModels: string[]
+): string | null {
+  if (provider === 'openai') {
+    return resolveDefaultImageModel(configured, availableModels)
+  }
+  return resolveDefaultImageModel(configured, availableModels)
+}
+
+export function isImageModelAvailable(
+  _provider: LlmProvider,
+  model: string,
+  availableModels: string[]
+): boolean {
+  return availableModels.includes(model)
+}
+
 export async function listInstalledImageModelNames(): Promise<string[]> {
   const models = await listModels()
   return models
@@ -26,24 +51,60 @@ export async function listInstalledImageModelNames(): Promise<string[]> {
     .map((m) => m.name)
 }
 
-export async function shouldOfferGenerateImageTool(
-  selectedModel: string
-): Promise<boolean> {
+export async function listAvailableImageModelNames(
+  provider: LlmProvider
+): Promise<string[]> {
+  if (provider === 'openai') {
+    const catalog = getOpenaiModelsCatalog()
+    const enabled = getOpenaiModelEnabledMap()
+    return catalog
+      .map((entry) => entry.id)
+      .filter((id) => enabled[id] === true && isOpenAiImageGenModel(id))
+  }
+
   const status = await getOllamaStatus()
-  if (!status.ok) return false
-  if (status.imageGenSupported === false) return false
-  let models
+  if (!status.ok || status.imageGenSupported === false) return []
   try {
-    models = await listModels()
+    return await listInstalledImageModelNames()
   } catch {
-    return false
+    return []
   }
-  const selected = models.find((m) => m.name === selectedModel)
-  if (modelIsImageGen(selectedModel, { capabilities: selected?.capabilities })) {
-    return false
+}
+
+export function shouldOfferGenerateImageTool(
+  provider: LlmProvider,
+  selectedModel: string
+): Promise<boolean>
+export function shouldOfferGenerateImageTool(selectedModel: string): Promise<boolean>
+export async function shouldOfferGenerateImageTool(
+  providerOrSelectedModel: LlmProvider | string,
+  selectedModelArg?: string
+): Promise<boolean> {
+  const provider: LlmProvider =
+    selectedModelArg === undefined ? 'ollama' : providerOrSelectedModel as LlmProvider
+  const selectedModel = selectedModelArg ?? providerOrSelectedModel
+  if (provider === 'ollama') {
+    const status = await getOllamaStatus()
+    if (!status.ok || status.imageGenSupported === false) return false
+    try {
+      const models = await listModels()
+      const selected = models.find((m) => m.name === selectedModel)
+      if (modelIsImageGen(selectedModel, { capabilities: selected?.capabilities })) {
+        return false
+      }
+      return models.some((m) =>
+        modelIsImageGen(m.name, { capabilities: m.capabilities })
+      )
+    } catch {
+      return false
+    }
   }
-  return models.some((m) =>
-    modelIsImageGen(m.name, { capabilities: m.capabilities })
+
+  const available = await listAvailableImageModelNames(provider)
+  if (isOpenAiImageGenModel(selectedModel)) return false
+  return (
+    !isImageModelAvailable(provider, selectedModel, available) &&
+    available.length > 0
   )
 }
 

@@ -1,4 +1,5 @@
 import type { OllamaModel } from '../../shared/types'
+import { isOpenAiImageGenModel } from '../../shared/openai-models'
 import {
   getOpenaiModelEnabledMap,
   getOpenaiModelsCatalog
@@ -8,7 +9,6 @@ import {
   openAiChatOnce,
   openAiChatStream
 } from '../openai-client'
-import { isOpenAiImageGenModel } from '../openai-image'
 import {
   detectVisionSupport as ollamaDetectVision,
   type OllamaChatChunk,
