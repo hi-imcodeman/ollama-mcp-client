@@ -123,7 +123,13 @@ export function applyBackgroundChatEvent(
     const dataUrls = event.images.map((b64) =>
       b64.startsWith('data:') ? b64 : `data:${mime};base64,${b64}`
     )
-    history = [...history, { role: 'assistant', content: '[generated image]' }]
+    history = [
+      ...history,
+      {
+        role: 'assistant',
+        content: 'An image was generated and displayed to the user.'
+      }
+    ]
     const responseMs = Date.now() - turnStartedAt
     const finishedAt = nowIso()
     let next = closeStreamingThinking(messages, turnStartedAt)

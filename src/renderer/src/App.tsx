@@ -703,7 +703,10 @@ export default function App(): React.JSX.Element {
         )
         historyRef.current = [
           ...historyRef.current,
-          { role: 'assistant', content: '[generated image]' }
+          {
+            role: 'assistant',
+            content: 'An image was generated and displayed to the user.'
+          }
         ]
         const historySnapshot = historyRef.current
         const responseMs =

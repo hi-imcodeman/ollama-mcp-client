@@ -74,6 +74,19 @@ function shortTurnId(turnId?: string): string {
   return turnId ? turnId.slice(0, 8) : '—'
 }
 
+function isExplicitImageRequest(prompt: string): boolean {
+  return /\b(generate|create|draw|make|show|give|another|one more)\b[\s\S]*\b(image|picture|photo|illustration|artwork)\b|\b(image|picture|photo|illustration|artwork)\b[\s\S]*\b(generate|create|draw|make|show|give|another|one more)\b/i.test(
+    prompt
+  )
+}
+
+function modelPlannedImageToolCall(thinking: string): boolean {
+  return (
+    /\bgenerate_image\b/i.test(thinking) &&
+    /\b(use|call|execute|invoke)\b[\s\S]{0,80}\bgenerate_image\b/i.test(thinking)
+  )
+}
+
 function estimateToolOverhead(tools: OllamaTool[]): number {
   if (tools.length === 0) return 0
   return estimateTokensFromChars(JSON.stringify(tools).length)
@@ -315,6 +328,70 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
     `[agent] turn start id=${tid} model=${payload.model} messages=${payload.messages.length} tools=${tools.length}`
   )
 
+  // Small image requests are frequently echoed by local models instead of
+  // producing a tool call (especially after the image placeholder in history).
+  // Route explicit image intent directly; normal requests still use the model.
+  const lastUserPrompt = [...payload.messages]
+    .reverse()
+    .find((message) => message.role === 'user')
+    ?.content.trim()
+  if (offerImageTool && lastUserPrompt && isExplicitImageRequest(lastUserPrompt)) {
+    const id = randomUUID()
+    emitTurn({
+      type: 'status',
+      phase: 'tool',
+      detail: 'Calling generate_image…'
+    })
+    emitTurn({
+      type: 'tool_start',
+      id,
+      name: GENERATE_IMAGE_NAME,
+      arguments: { prompt: lastUserPrompt }
+    })
+    emitTurn({
+      type: 'status',
+      phase: 'generating',
+      detail: 'Generating image…'
+    })
+    const gen = await runGenerateImageTool(
+      { prompt: lastUserPrompt },
+      abort.signal
+    )
+    if (gen.ok && !abort.signal.aborted && activeTurnId === turnId) {
+      emitTurn({
+        type: 'assistant_images',
+        images: [gen.imageBase64],
+        mime: 'image/png'
+      })
+      emitTurn({
+        type: 'tool_result',
+        id,
+        name: GENERATE_IMAGE_NAME,
+        ok: true,
+        result: gen.message
+      })
+      finish()
+      return
+    }
+    if (abort.signal.aborted || activeTurnId !== turnId) {
+      emitTurn({ type: 'error', message: 'Aborted' })
+      return
+    }
+    emitTurn({
+      type: 'tool_result',
+      id,
+      name: GENERATE_IMAGE_NAME,
+      ok: false,
+      result: gen.ok ? 'Aborted' : gen.message
+    })
+    emitTurn({
+      type: 'error',
+      message: gen.ok ? 'Image generation was aborted.' : gen.message
+    })
+    finish()
+    return
+  }
+
   // Compact older history when near the context window (model history only).
   const toolOverhead = estimateToolOverhead(tools)
   let workingMessages = payload.messages
@@ -489,6 +566,8 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       let firstToolCallAt: number | null = null
       let thinkBuf = ''
       let contentBuf = ''
+      let thinkingForDetection = ''
+      let inferredImageToolCall = false
       let streamEmitTimer: ReturnType<typeof setImmediate> | null = null
 
       const flushStreamEmits = (): void => {
@@ -530,6 +609,10 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
 
           const thinking = chunk.message?.thinking
           if (thinking) {
+            thinkingForDetection = `${thinkingForDetection}${thinking}`.slice(-4000)
+            if (modelPlannedImageToolCall(thinkingForDetection)) {
+              inferredImageToolCall = true
+            }
             if (!sawThinking) {
               sawThinking = true
               firstThinkingAt = Date.now()
@@ -598,6 +681,62 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       flushStreamEmits()
 
       const finalContent = content || streamedContent
+      if (
+        toolCalls.length === 0 &&
+        offerImageTool &&
+        inferredImageToolCall &&
+        lastUserPrompt
+      ) {
+        const id = randomUUID()
+        emitTurn({
+          type: 'tool_start',
+          id,
+          name: GENERATE_IMAGE_NAME,
+          arguments: { prompt: lastUserPrompt }
+        })
+        emitTurn({
+          type: 'status',
+          phase: 'generating',
+          detail: 'Generating image…'
+        })
+        const gen = await runGenerateImageTool(
+          { prompt: lastUserPrompt },
+          abort.signal
+        )
+        if (gen.ok && !abort.signal.aborted && activeTurnId === turnId) {
+          emitTurn({
+            type: 'assistant_images',
+            images: [gen.imageBase64],
+            mime: 'image/png'
+          })
+          emitTurn({
+            type: 'tool_result',
+            id,
+            name: GENERATE_IMAGE_NAME,
+            ok: true,
+            result: gen.message
+          })
+          finish()
+          return
+        }
+        if (abort.signal.aborted || activeTurnId !== turnId) {
+          emitTurn({ type: 'error', message: 'Aborted' })
+          return
+        }
+        emitTurn({
+          type: 'tool_result',
+          id,
+          name: GENERATE_IMAGE_NAME,
+          ok: false,
+          result: gen.ok ? 'Aborted' : gen.message
+        })
+        emitTurn({
+          type: 'error',
+          message: gen.ok ? 'Image generation was aborted.' : gen.message
+        })
+        finish()
+        return
+      }
       if (toolCalls.length > 0) {
         emitContext(promptEvalCount, evalCount)
       }
@@ -610,6 +749,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           : undefined
       console.log(
         `[agent] iter=${iteration} stream-done +${ms(iterStartedAt)} id=${tid} contentChars=${finalContent.length} tools=${toolCalls.length}` +
+          (inferredImageToolCall ? ' inferred-image-tool=true' : '') +
           (firstThinkingAt != null
             ? ` ttf-thinking=${ms(iterStartedAt, firstThinkingAt)}`
             : '') +
@@ -684,6 +824,18 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
               })
               ok = true
               result = gen.message
+              console.log(
+                `[agent] tool end id=${tid} name=${tc.name} ok=${ok} +${ms(toolStartedAt)} resultChars=${result.length}`
+              )
+              emitTurn({
+                type: 'tool_result',
+                id,
+                name: tc.name,
+                ok,
+                result
+              })
+              finish()
+              return
             }
           } else {
             ok = false
