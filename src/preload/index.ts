@@ -16,6 +16,8 @@ import type {
   LibrarySearchResult,
   McpServerConfig,
   McpToolInfo,
+  LlmProvider,
+  OpenAiStatus,
   OllamaModel,
   OllamaModelDetails,
   OllamaStatus,
@@ -37,8 +39,39 @@ const api = {
     ipcRenderer.invoke('config:setShowThinking', enabled),
   setMaxToolIterations: (value: number): Promise<number> =>
     ipcRenderer.invoke('config:setMaxToolIterations', value),
+  setLlmProvider: (provider: LlmProvider): Promise<LlmProvider> =>
+    ipcRenderer.invoke('config:setLlmProvider', provider),
+  setOpenaiEnabled: (enabled: boolean): Promise<boolean> =>
+    ipcRenderer.invoke('config:setOpenaiEnabled', enabled),
+  setOpenaiApiKey: (key: string | null): Promise<string | null> =>
+    ipcRenderer.invoke('config:setOpenaiApiKey', key),
+  setOpenaiModelEnabled: (id: string, enabled: boolean): Promise<Record<string, boolean>> =>
+    ipcRenderer.invoke('config:setOpenaiModelEnabled', id, enabled),
+  setSelectedModelForProvider: (
+    provider: LlmProvider,
+    model: string | null
+  ): Promise<void> => ipcRenderer.invoke('config:setSelectedModelForProvider', provider, model),
   setDefaultImageModel: (model: string | null): Promise<string | null> =>
     ipcRenderer.invoke('config:setDefaultImageModel', model),
+
+  llm: {
+    getEffectiveProvider: (): Promise<{
+      configured: LlmProvider
+      effective: LlmProvider
+      fallback: boolean
+      reason?: string
+    }> => ipcRenderer.invoke('llm:getEffectiveProvider')
+  },
+
+  openai: {
+    validateAndFetchModels: (): Promise<AppConfig> =>
+      ipcRenderer.invoke('openai:validateAndFetchModels'),
+    refreshModels: (): Promise<AppConfig> =>
+      ipcRenderer.invoke('openai:refreshModels'),
+    getStatus: (): Promise<OpenAiStatus> => ipcRenderer.invoke('openai:getStatus'),
+    listChatModels: (): Promise<OllamaModel[]> =>
+      ipcRenderer.invoke('openai:listChatModels')
+  },
 
   ollama: {
     getStatus: (): Promise<OllamaStatus> => ipcRenderer.invoke('ollama:getStatus'),

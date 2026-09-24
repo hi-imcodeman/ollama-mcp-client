@@ -3,13 +3,15 @@ import type {
   LibraryCapability,
   LibraryModelDetail,
   LibraryModelSummary,
+  OpenAiModelEntry,
+  OpenAiStatus,
   OllamaModel,
   OllamaModelDetails,
   PullProgressEvent
 } from '../../../shared/types'
 import { MarkdownContent } from './MarkdownContent'
 
-type ModelsTab = 'installed' | 'library'
+type ModelsTab = 'installed' | 'library' | 'openai'
 type LibrarySort = 'popular' | 'newest' | 'smallest' | 'largest'
 type InstalledSort = 'name' | 'smallest' | 'largest'
 
@@ -17,8 +19,15 @@ interface ModelsPageProps {
   models: OllamaModel[]
   ollamaOk: boolean
   selectedModel: string | null
+  openaiEnabled: boolean
+  openaiStatus: OpenAiStatus
+  openaiCatalog: OpenAiModelEntry[]
+  openaiModelEnabled: Record<string, boolean>
+  selectedOpenAiModel: string | null
   active?: boolean
   onRefreshModels: () => Promise<void>
+  onRefreshOpenAi: () => Promise<void>
+  onToggleOpenAiModel: (id: string, enabled: boolean) => Promise<void>
   onUseInChat: (model: string) => void
 }
 
@@ -172,11 +181,19 @@ export function ModelsPage({
   models,
   ollamaOk,
   selectedModel,
+  openaiEnabled,
+  openaiStatus,
+  openaiCatalog,
+  openaiModelEnabled,
+  selectedOpenAiModel,
   active = true,
   onRefreshModels,
+  onRefreshOpenAi,
+  onToggleOpenAiModel,
   onUseInChat
 }: ModelsPageProps): React.JSX.Element {
   const [tab, setTab] = useState<ModelsTab>('installed')
+  const [openaiQuery, setOpenaiQuery] = useState('')
   const [installedQuery, setInstalledQuery] = useState('')
   const [installedCap, setInstalledCap] = useState<string | null>(null)
   const [installedSort, setInstalledSort] = useState<InstalledSort>('name')
@@ -518,17 +535,28 @@ export function ModelsPage({
       ? Math.min(100, Math.round((pullProgress.completed / pullProgress.total) * 100))
       : null
 
+  const tabIds = (
+    openaiEnabled
+      ? (['installed', 'openai', 'library'] as const)
+      : (['installed', 'library'] as const)
+  )
+
+  const filteredOpenAi = useMemo(() => {
+    const q = openaiQuery.trim().toLowerCase()
+    return openaiCatalog.filter((m) => !q || m.id.toLowerCase().includes(q))
+  }, [openaiCatalog, openaiQuery])
+
   return (
     <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
       <header className="titlebar-drag titlebar-overlay-pad flex items-center justify-between border-b border-[#243041] px-5 py-4">
         <div>
           <h2 className="text-lg font-semibold text-[#f0f4f8]">Models</h2>
           <p className="text-xs text-[#8b9aab]">
-            Manage installed models and browse the Ollama library
+            Ollama local models, OpenAI catalog, and the Ollama library
           </p>
         </div>
         <div className="titlebar-no-drag flex gap-1 rounded-lg border border-[#2a3a4d] bg-[#121820] p-0.5">
-          {(['installed', 'library'] as const).map((id) => (
+          {tabIds.map((id) => (
             <button
               key={id}
               type="button"
@@ -539,7 +567,7 @@ export function ModelsPage({
                   : 'text-[#8b9aab] hover:text-[#e7ecf1]'
               }`}
             >
-              {id}
+              {id === 'openai' ? 'OpenAI' : id}
             </button>
           ))}
         </div>
@@ -577,7 +605,69 @@ export function ModelsPage({
 
       <div className="flex min-h-0 flex-1">
         <div ref={libraryScrollRef} className="min-w-0 flex-1 overflow-y-auto px-5 py-4">
-          {tab === 'installed' ? (
+          {tab === 'openai' ? (
+            <div className="space-y-4">
+              {!openaiStatus.validationOk && (
+                <p className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+                  Validate your API key in Settings to load models.{' '}
+                  {openaiStatus.validationError ? `(${openaiStatus.validationError})` : ''}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={openaiQuery}
+                  onChange={(e) => setOpenaiQuery(e.target.value)}
+                  placeholder="Filter OpenAI models…"
+                  className="min-w-[12rem] flex-1 rounded-lg border border-[#2a3a4d] bg-[#0f1419] px-3 py-2 text-sm text-[#e7ecf1] placeholder:text-[#6b7a8c] focus:border-[#2d6cb5] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => void onRefreshOpenAi()}
+                  className="rounded-lg border border-[#2a3a4d] px-3 py-2 text-xs text-[#c5d0dc] hover:bg-[#1a2430]"
+                >
+                  Refresh from API
+                </button>
+              </div>
+              <p className="text-xs text-[#6b7a8c]">
+                New models are disabled by default. Enable models here to show them in chat when
+                OpenAI is the selected provider.
+              </p>
+              <ul className="space-y-2">
+                {filteredOpenAi.map((m) => {
+                  const enabled = Boolean(openaiModelEnabled[m.id])
+                  return (
+                    <li
+                      key={m.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#2a3a4d] bg-[#121820] px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-[#e7ecf1]">{m.id}</p>
+                        {m.ownedBy ? (
+                          <p className="text-[11px] text-[#6b7a8c]">{m.ownedBy}</p>
+                        ) : null}
+                        {m.id === selectedOpenAiModel && (
+                          <span className="text-[11px] text-[#6eb5ff]">Selected in chat</span>
+                        )}
+                      </div>
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-[#c5d0dc]">
+                        <input
+                          type="checkbox"
+                          checked={enabled}
+                          onChange={(e) =>
+                            void onToggleOpenAiModel(m.id, e.target.checked)
+                          }
+                        />
+                        Enabled for chat
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+              {openaiStatus.validationOk && filteredOpenAi.length === 0 && (
+                <p className="text-sm text-[#8b9aab]">No models match your filter.</p>
+              )}
+            </div>
+          ) : tab === 'installed' ? (
             <div className="space-y-4">
               {!ollamaOk && (
                 <p className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">

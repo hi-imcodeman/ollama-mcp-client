@@ -5,8 +5,10 @@ import type {
   ChatMessage,
   ChatQueueState,
   ChatSession,
+  LlmProvider,
   McpToolInfo,
   OllamaModel,
+  OpenAiStatus,
   ScheduleNotificationPayload,
   SessionQueueStatus,
   TelegramStatus,
@@ -66,6 +68,23 @@ export default function App(): React.JSX.Element {
   const [ollamaError, setOllamaError] = useState<string | undefined>()
   const [imageGenSupported, setImageGenSupported] = useState(true)
   const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:11434')
+  const [llmProvider, setLlmProvider] = useState<LlmProvider>('ollama')
+  const [openaiEnabled, setOpenaiEnabled] = useState(false)
+  const [openaiApiKeyDraft, setOpenaiApiKeyDraft] = useState('')
+  const [openaiStatus, setOpenaiStatus] = useState<OpenAiStatus>({
+    enabled: false,
+    validationOk: false,
+    validationError: null,
+    catalogCount: 0,
+    enabledCount: 0
+  })
+  const [openaiCatalog, setOpenaiCatalog] = useState<
+    import('../../shared/types').OpenAiModelEntry[]
+  >([])
+  const [openaiModelEnabled, setOpenaiModelEnabled] = useState<Record<string, boolean>>(
+    {}
+  )
+  const [selectedOpenAiModel, setSelectedOpenAiModel] = useState<string | null>(null)
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<UiMessage[]>([])
@@ -326,38 +345,59 @@ export default function App(): React.JSX.Element {
     setTools(t)
   }, [])
 
-  const refreshOllama = useCallback(async () => {
-    const status = await window.api.ollama.getStatus()
-    setOllamaOk(status.ok)
-    setOllamaError(status.error)
-    setBaseUrl(status.baseUrl)
-    setImageGenSupported(status.imageGenSupported !== false)
-    if (status.ok) {
-      try {
-        const list = await window.api.ollama.listModels()
-        setModels(list)
-        const names = list.map((m) => m.name)
-        setSelectedModel((current) => {
-          if (current && names.includes(current)) return current
-          const next = names[0] ?? null
-          if (next) {
-            void window.api.ollama.setSelectedModel(next)
-          }
-          return next
-        })
-      } catch (err) {
-        setOllamaOk(false)
-        setOllamaError(err instanceof Error ? err.message : String(err))
-      }
-    } else {
-      setModels([])
-    }
+  const refreshOpenAiStatus = useCallback(async () => {
+    setOpenaiStatus(await window.api.openai.getStatus())
   }, [])
 
-  useEffect(() => {
-    void (async () => {
-      const config = await window.api.getConfig()
+  const refreshModelsForProvider = useCallback(
+    async (provider: LlmProvider) => {
+      if (provider === 'openai') {
+        try {
+          const list = await window.api.openai.listChatModels()
+          setModels(list)
+          const names = list.map((m) => m.name)
+          setSelectedModel((current) => {
+            if (current && names.includes(current)) return current
+            const next = names[0] ?? null
+            if (next) {
+              void window.api.setSelectedModelForProvider('openai', next)
+            }
+            return next
+          })
+        } catch {
+          setModels([])
+        }
+        return
+      }
+      const status = await window.api.ollama.getStatus()
+      if (!status.ok) {
+        setModels([])
+        return
+      }
+      const list = await window.api.ollama.listModels()
+      setModels(list)
+      const names = list.map((m) => m.name)
+      setSelectedModel((current) => {
+        if (current && names.includes(current)) return current
+        const next = names[0] ?? null
+        if (next) {
+          void window.api.setSelectedModelForProvider('ollama', next)
+        }
+        return next
+      })
+    },
+    []
+  )
+
+  const applyConfig = useCallback(
+    async (config: Awaited<ReturnType<typeof window.api.getConfig>>) => {
       setBaseUrl(config.ollamaBaseUrl)
+      setLlmProvider(config.llmProvider)
+      setOpenaiEnabled(config.openaiEnabled)
+      setOpenaiApiKeyDraft(config.openaiApiKey ?? '')
+      setOpenaiCatalog(config.openaiModelsCatalog)
+      setOpenaiModelEnabled(config.openaiModelEnabled)
+      setSelectedOpenAiModel(config.selectedModelByProvider.openai)
       setSelectedModel(config.selectedModel)
       setShowThinking(Boolean(config.showThinking))
       showThinkingRef.current = Boolean(config.showThinking)
@@ -365,13 +405,44 @@ export default function App(): React.JSX.Element {
       setDefaultImageModel(config.defaultImageModel ?? null)
       setTelegramEnabled(Boolean(config.telegramEnabled))
       setTelegramAllowedUserIds(config.telegramAllowedUserIds)
+      await refreshOpenAiStatus()
+      await refreshModelsForProvider(config.llmProvider)
+    },
+    [refreshModelsForProvider, refreshOpenAiStatus]
+  )
+
+  const refreshOllama = useCallback(async () => {
+    const status = await window.api.ollama.getStatus()
+    setOllamaOk(status.ok)
+    setOllamaError(status.error)
+    setBaseUrl(status.baseUrl)
+    setImageGenSupported(status.imageGenSupported !== false)
+    if (status.ok && llmProvider === 'ollama') {
+      try {
+        await refreshModelsForProvider('ollama')
+      } catch (err) {
+        setOllamaOk(false)
+        setOllamaError(err instanceof Error ? err.message : String(err))
+      }
+    } else if (llmProvider === 'ollama') {
+      setModels([])
+    }
+  }, [llmProvider, refreshModelsForProvider])
+
+  useEffect(() => {
+    void (async () => {
+      const config = await window.api.getConfig()
       setTelegramStatus(await window.api.telegram.getStatus())
       const sessionState = await window.api.sessions.list()
       applySessionsState(sessionState)
       await refreshServers()
-      await refreshOllama()
+      await applyConfig(config)
+      const status = await window.api.ollama.getStatus()
+      setOllamaOk(status.ok)
+      setOllamaError(status.error)
+      setImageGenSupported(status.imageGenSupported !== false)
     })()
-  }, [applySessionsState, refreshOllama, refreshServers])
+  }, [applyConfig, applySessionsState, refreshServers])
 
   useEffect(() => {
     queueStateRef.current = queueState
@@ -674,7 +745,9 @@ export default function App(): React.JSX.Element {
               responseMs,
               contextUsed: event.contextUsed ?? last.contextUsed,
               contextLimit: event.contextLimit ?? last.contextLimit,
-              tokensPerSec: event.tokensPerSec ?? last.tokensPerSec
+              tokensPerSec: event.tokensPerSec ?? last.tokensPerSec,
+              tokenUsage: event.tokenUsage ?? last.tokenUsage,
+              multiCallTurn: event.multiCallTurn ?? last.multiCallTurn
             }
           } else if (event.content) {
             next.push({
@@ -687,7 +760,9 @@ export default function App(): React.JSX.Element {
               model: turnModelRef.current ?? undefined,
               contextUsed: event.contextUsed,
               contextLimit: event.contextLimit,
-              tokensPerSec: event.tokensPerSec
+              tokensPerSec: event.tokensPerSec,
+              tokenUsage: event.tokenUsage,
+              multiCallTurn: event.multiCallTurn
             })
           }
           messagesRef.current = next
@@ -726,7 +801,10 @@ export default function App(): React.JSX.Element {
               streaming: false,
               createdAt: finishedAt,
               durationMs: segmentDurationMs(last.startedAt),
-              responseMs
+              responseMs,
+              contextUsed: event.contextUsed ?? last.contextUsed,
+              contextLimit: event.contextLimit ?? last.contextLimit,
+              tokenUsage: event.tokenUsage ?? last.tokenUsage
             }
           } else {
             next.push({
@@ -737,7 +815,10 @@ export default function App(): React.JSX.Element {
               createdAt: finishedAt,
               streaming: false,
               responseMs,
-              model: turnModelRef.current ?? undefined
+              model: turnModelRef.current ?? undefined,
+              contextUsed: event.contextUsed,
+              contextLimit: event.contextLimit,
+              tokenUsage: event.tokenUsage
             })
           }
           messagesRef.current = next
@@ -841,6 +922,21 @@ export default function App(): React.JSX.Element {
           messagesRef.current,
           event.messages
         )
+      } else if (event.type === 'provider_fallback') {
+        if (!stillCurrent()) return
+        setMessages((prev) => {
+          if (!stillCurrent()) return prev
+          const notice = {
+            kind: 'notice' as const,
+            id: uid(),
+            content: event.message,
+            createdAt: nowIso()
+          }
+          const next = [...prev, notice]
+          messagesRef.current = next
+          persistSessionRef.current(sessionId, next, historyRef.current)
+          return next
+        })
       } else if (event.type === 'notice') {
         if (!stillCurrent()) return
         setMessages((prev) => {
@@ -1098,7 +1194,10 @@ export default function App(): React.JSX.Element {
   const handleSelectModel = async (model: string): Promise<void> => {
     setSelectedModel(model)
     setContextUsage(null)
-    await window.api.ollama.setSelectedModel(model)
+    await window.api.setSelectedModelForProvider(llmProvider, model)
+    if (llmProvider === 'openai') {
+      setSelectedOpenAiModel(model)
+    }
   }
 
   const handleUseModelInChat = async (model: string): Promise<void> => {
@@ -1144,6 +1243,50 @@ export default function App(): React.JSX.Element {
     const saved = await window.api.telegram.setAllowedUserIds(ids)
     setTelegramAllowedUserIds(saved)
   }
+
+  const handleSetLlmProvider = async (provider: LlmProvider): Promise<void> => {
+    await window.api.setLlmProvider(provider)
+    setLlmProvider(provider)
+    const config = await window.api.getConfig()
+    setSelectedModel(config.selectedModel)
+    await refreshModelsForProvider(provider)
+  }
+
+  const handleSetOpenaiEnabled = async (enabled: boolean): Promise<void> => {
+    await window.api.setOpenaiEnabled(enabled)
+    setOpenaiEnabled(enabled)
+    await refreshOpenAiStatus()
+  }
+
+  const handleSetOpenaiApiKey = async (key: string | null): Promise<void> => {
+    await window.api.setOpenaiApiKey(key)
+    setOpenaiApiKeyDraft(key ?? '')
+    await refreshOpenAiStatus()
+  }
+
+  const handleValidateOpenai = async (): Promise<void> => {
+    const config = await window.api.openai.validateAndFetchModels()
+    await applyConfig(config)
+  }
+
+  const handleRefreshOpenAi = async (): Promise<void> => {
+    const config = await window.api.openai.refreshModels()
+    await applyConfig(config)
+  }
+
+  const handleToggleOpenAiModel = async (id: string, enabled: boolean): Promise<void> => {
+    await window.api.setOpenaiModelEnabled(id, enabled)
+    setOpenaiModelEnabled((prev) => ({ ...prev, [id]: enabled }))
+    await refreshOpenAiStatus()
+    if (llmProvider === 'openai') {
+      await refreshModelsForProvider('openai')
+    }
+  }
+
+  const openAiChatReady =
+    openaiStatus.validationOk && openaiStatus.enabledCount > 0
+  const canSendBackend =
+    llmProvider === 'openai' ? openAiChatReady || ollamaOk : ollamaOk
 
   const handleNavigate = (
     target: 'chat' | 'models' | 'mcp' | 'skills' | 'schedules' | 'settings'
@@ -1207,12 +1350,21 @@ export default function App(): React.JSX.Element {
             models={models}
             ollamaOk={ollamaOk}
             selectedModel={selectedModel}
+            openaiEnabled={openaiEnabled}
+            openaiStatus={openaiStatus}
+            openaiCatalog={openaiCatalog}
+            openaiModelEnabled={openaiModelEnabled}
+            selectedOpenAiModel={selectedOpenAiModel}
             active={view === 'models'}
             onRefreshModels={async () => {
               await refreshOllama()
-              const selected = await window.api.ollama.getSelectedModel()
-              setSelectedModel(selected)
+              if (llmProvider === 'ollama') {
+                const config = await window.api.getConfig()
+                setSelectedModel(config.selectedModel)
+              }
             }}
+            onRefreshOpenAi={() => handleRefreshOpenAi()}
+            onToggleOpenAiModel={(id, enabled) => handleToggleOpenAiModel(id, enabled)}
             onUseInChat={(m) => void handleUseModelInChat(m)}
           />
         </div>
@@ -1253,6 +1405,10 @@ export default function App(): React.JSX.Element {
           }
         >
           <Settings
+            llmProvider={llmProvider}
+            openaiEnabled={openaiEnabled}
+            openaiApiKeyDraft={openaiApiKeyDraft}
+            openaiStatus={openaiStatus}
             ollamaOk={ollamaOk}
             ollamaError={ollamaError}
             baseUrl={baseUrl}
@@ -1274,6 +1430,11 @@ export default function App(): React.JSX.Element {
             onSetBaseUrl={(u) => void handleSetBaseUrl(u)}
             onSetShowThinking={(v) => void handleSetShowThinking(v)}
             onSetMaxToolIterations={(v) => void handleSetMaxToolIterations(v)}
+            onSetLlmProvider={(p) => void handleSetLlmProvider(p)}
+            onSetOpenaiEnabled={(v) => void handleSetOpenaiEnabled(v)}
+            onSetOpenaiApiKey={(k) => void handleSetOpenaiApiKey(k)}
+            onValidateOpenai={() => void handleValidateOpenai()}
+            onOpenModelsPage={() => handleNavigate('models')}
             onSetDefaultImageModel={(model) => void handleSetDefaultImageModel(model)}
           />
         </div>
@@ -1290,11 +1451,12 @@ export default function App(): React.JSX.Element {
           showThinking={showThinking}
           canSend={
             Boolean(selectedModel) &&
-            ollamaOk &&
+            canSendBackend &&
             !activeSessionReadOnly &&
             activeSessionQueueStatus === 'idle'
           }
           readOnly={activeSessionReadOnly}
+          llmProvider={llmProvider}
           ollamaOk={ollamaOk}
           imageGenSupported={imageGenSupported}
           models={models}

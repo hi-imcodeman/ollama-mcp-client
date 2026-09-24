@@ -33,9 +33,39 @@ export interface CatalogServer {
 
 export type TelegramMirrorMode = 'full' | 'final'
 
+export type LlmProvider = 'ollama' | 'openai'
+
+export interface OpenAiModelEntry {
+  id: string
+  ownedBy?: string
+  created?: number
+}
+
+export interface SelectedModelByProvider {
+  ollama: string | null
+  openai: string | null
+}
+
+export interface OpenAiStatus {
+  enabled: boolean
+  validationOk: boolean
+  validationError: string | null
+  catalogCount: number
+  enabledCount: number
+}
+
 export interface AppConfig {
   ollamaBaseUrl: string
+  /** @deprecated Use selectedModelByProvider; kept for migration and UI compat */
   selectedModel: string | null
+  llmProvider: LlmProvider
+  openaiEnabled: boolean
+  openaiApiKey: string | null
+  openaiValidationOk: boolean
+  openaiValidationError: string | null
+  openaiModelsCatalog: OpenAiModelEntry[]
+  openaiModelEnabled: Record<string, boolean>
+  selectedModelByProvider: SelectedModelByProvider
   servers: McpServerConfig[]
   /** When true, model reasoning/thinking is shown in the chat transcript. */
   showThinking: boolean
@@ -197,8 +227,26 @@ export type ActivityPhase =
   | 'synthesizing'
   | 'compacting'
 
+export interface TokenUsageBreakdown {
+  provider: 'ollama' | 'openai'
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  cachedPromptTokens?: number
+  reasoningTokens?: number
+  /** Ollama sums (same as prompt/completion when mapped). */
+  ollamaPromptEval?: number
+  ollamaEval?: number
+}
+
 export type ChatEvent =
   | { type: 'user'; content: string; turnId?: string; sessionId?: string }
+  | {
+      type: 'provider_fallback'
+      message: string
+      turnId?: string
+      sessionId?: string
+    }
   | {
       type: 'status'
       phase: Exclude<ActivityPhase, 'idle'>
@@ -217,6 +265,9 @@ export type ChatEvent =
       contextLimit?: number
       /** Generated tokens per second for this reply (Ollama eval_count / eval_duration). */
       tokensPerSec?: number
+      tokenUsage?: TokenUsageBreakdown
+      /** True when usage sums more than one model call in the turn. */
+      multiCallTurn?: boolean
     }
   | {
       type: 'assistant_images'
@@ -224,6 +275,9 @@ export type ChatEvent =
       mime?: string
       turnId?: string
       sessionId?: string
+      tokenUsage?: TokenUsageBreakdown
+      contextUsed?: number
+      contextLimit?: number
     }
   | {
       type: 'tool_start'
@@ -313,6 +367,8 @@ export type UiMessage =
       contextLimit?: number
       /** Generated image data URLs (e.g. data:image/png;base64,...). */
       images?: string[]
+      tokenUsage?: TokenUsageBreakdown
+      multiCallTurn?: boolean
     }
   | {
       kind: 'thinking'

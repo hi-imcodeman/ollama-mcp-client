@@ -1,6 +1,17 @@
 import { randomUUID } from 'crypto'
-import type { ChatEvent, ChatMessage, ChatSendPayload } from '../shared/types'
-import { getMaxToolIterations } from './config-store'
+import type {
+  ChatEvent,
+  ChatMessage,
+  ChatSendPayload,
+  LlmProvider,
+  TokenUsageBreakdown
+} from '../shared/types'
+import {
+  emptyTokenUsage,
+  hasTokenUsageData,
+  mergeTokenUsage
+} from '../shared/tokenUsage'
+import { getMaxToolIterations, getSelectedModelForProvider } from './config-store'
 import { emitChatEvent } from './chat-events'
 import { compactIfNeeded, shouldCompact } from './context-compact'
 import {
@@ -8,6 +19,8 @@ import {
   estimateTokensFromChars,
   formatTokenCount
 } from '../shared/contextUsage'
+import { getEffectiveLlmProvider, resolveEffectiveLlmProvider } from './llm'
+import type { LlmChatStreamResult } from './llm/types'
 import {
   GENERATE_IMAGE_NAME,
   generateImageToolDefinition,
@@ -16,6 +29,7 @@ import {
 } from './image-gen-tool'
 import { mcpManager } from './mcp-manager'
 import { generateImageBase64 } from './ollama-image'
+import { generateOpenAiImageBase64 } from './openai-image'
 import {
   LOAD_SKILL_NAME,
   loadSkillByName,
@@ -23,11 +37,6 @@ import {
   skillContextSystemMessage
 } from './skills'
 import {
-  chatStream,
-  detectVisionSupport,
-  getModelInfo,
-  modelIsImageGen,
-  resolveContextLength,
   toOllamaMessages,
   type OllamaChatMessage,
   type OllamaTool
@@ -39,6 +48,31 @@ const WRAP_UP_USER_MESSAGE =
 const MAX_TOOL_RESULT_CHARS = 24_000
 const MIN_NUM_PREDICT = 256
 const PREDICT_RESERVE = 64
+
+function mergeLlmStreamUsage(
+  acc: TokenUsageBreakdown,
+  provider: LlmProvider,
+  result: LlmChatStreamResult
+): TokenUsageBreakdown {
+  if (provider === 'openai' && result.usage) {
+    return mergeTokenUsage(acc, {
+      promptTokens: result.usage.promptTokens,
+      completionTokens: result.usage.completionTokens,
+      totalTokens: result.usage.totalTokens,
+      cachedPromptTokens: result.usage.cachedPromptTokens,
+      reasoningTokens: result.usage.reasoningTokens
+    })
+  }
+  if (result.promptEvalCount != null || result.evalCount != null) {
+    return mergeTokenUsage(acc, {
+      promptTokens: result.promptEvalCount,
+      completionTokens: result.evalCount,
+      ollamaPromptEval: result.promptEvalCount,
+      ollamaEval: result.evalCount
+    })
+  }
+  return acc
+}
 
 let activeAbort: AbortController | null = null
 let activeTurnId: string | null = null
@@ -248,6 +282,26 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   const turnStartedAt = Date.now()
   const tid = shortTurnId(turnId)
 
+  const { effective, fallback, reason } = resolveEffectiveLlmProvider()
+  const llm = getEffectiveLlmProvider()
+  const turnModel = getSelectedModelForProvider(effective) ?? payload.model
+
+  if (fallback && reason) {
+    emitTurn({
+      type: 'provider_fallback',
+      message: `${reason} Using Ollama for this turn.`
+    })
+  }
+
+  if (!turnModel) {
+    emitTurn({
+      type: 'error',
+      message: 'No model selected for the active LLM provider.'
+    })
+    finish()
+    return
+  }
+
   emitTurn({
     type: 'status',
     phase: 'thinking',
@@ -255,8 +309,9 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   })
 
   // Image-generation models use /api/generate instead of the chat/tools loop.
-  const modelInfo = await getModelInfo(payload.model).catch(() => null)
-  const contextLimit = await resolveContextLength(payload.model, modelInfo)
+  const modelInfo = await llm.getModelInfo(turnModel).catch(() => null)
+  const contextLimit = await llm.resolveContextLength(turnModel, modelInfo)
+  const numCtx = contextLimit ?? undefined
 
   const emitContext = (promptEvalCount?: number, evalCount?: number): void => {
     if (promptEvalCount == null && evalCount == null) return
@@ -266,9 +321,9 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       limit: contextLimit ?? 0
     })
   }
-  if (modelIsImageGen(payload.model, modelInfo)) {
+  if (llm.modelIsImageGen(turnModel, modelInfo)) {
     console.log(
-      `[agent] turn start id=${tid} model=${payload.model} messages=${payload.messages.length} tools=0`
+      `[agent] turn start id=${tid} provider=${effective} model=${turnModel} messages=${payload.messages.length} tools=0`
     )
     const lastUser = [...payload.messages].reverse().find((m) => m.role === 'user')
     const prompt = (lastUser?.content ?? '').trim()
@@ -285,22 +340,35 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
     })
 
     try {
-      const imageBase64 = await generateImageBase64(
-        payload.model,
-        prompt,
-        abort.signal
-      )
+      const imageResult =
+        effective === 'openai'
+          ? await generateOpenAiImageBase64(turnModel, prompt, abort.signal)
+          : { b64: await generateImageBase64(turnModel, prompt, abort.signal) }
       if (abort.signal.aborted || activeTurnId !== turnId) {
         emitTurn({ type: 'error', message: 'Aborted' })
         return
       }
       console.log(
-        `[agent] image done id=${tid} bytes=${imageBase64.length} +${ms(turnStartedAt)}`
+        `[agent] image done id=${tid} bytes=${imageResult.b64.length} +${ms(turnStartedAt)}`
       )
+      let tokenUsage: TokenUsageBreakdown | undefined
+      if (imageResult.usage) {
+        const u = mergeTokenUsage(emptyTokenUsage('openai'), {
+          promptTokens: imageResult.usage.promptTokens,
+          completionTokens: imageResult.usage.completionTokens,
+          totalTokens: imageResult.usage.totalTokens,
+          cachedPromptTokens: imageResult.usage.cachedPromptTokens,
+          reasoningTokens: imageResult.usage.reasoningTokens
+        })
+        if (hasTokenUsageData(u)) tokenUsage = u
+      }
       emitTurn({
         type: 'assistant_images',
-        images: [imageBase64],
-        mime: 'image/png'
+        images: [imageResult.b64],
+        mime: 'image/png',
+        tokenUsage,
+        contextUsed: tokenUsage?.totalTokens,
+        contextLimit: contextLimit ?? undefined
       })
       finish()
       return
@@ -319,13 +387,13 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
 
   const skillTool = loadSkillTool()
   const baseTools = [...(skillTool ? [skillTool] : []), ...toolsFromMcp()]
-  const offerImageTool = await shouldOfferGenerateImageTool(payload.model)
+  const offerImageTool = await shouldOfferGenerateImageTool(turnModel)
   const tools = offerImageTool
     ? [...baseTools, generateImageToolDefinition()]
     : baseTools
 
   console.log(
-    `[agent] turn start id=${tid} model=${payload.model} messages=${payload.messages.length} tools=${tools.length}`
+    `[agent] turn start id=${tid} provider=${effective} model=${turnModel} messages=${payload.messages.length} tools=${tools.length}`
   )
 
   // Small image requests are frequently echoed by local models instead of
@@ -398,9 +466,9 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   try {
     const beforeCompact = workingMessages
     workingMessages = await applyCompact({
-      model: payload.model,
+      model: turnModel,
       messages: workingMessages,
-      limit: contextLimit,
+      limit: numCtx,
       measuredUsed: payload.contextUsed,
       extraTokens: toolOverhead,
       signal: abort.signal,
@@ -452,12 +520,12 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
     }))
   if (imageStats.length) {
     console.log('[agent] image payloads', imageStats)
-    const info = modelInfo ?? (await getModelInfo(payload.model).catch(() => null))
-    const support = detectVisionSupport(payload.model, info)
+    const info = modelInfo ?? (await llm.getModelInfo(turnModel).catch(() => null))
+    const support = llm.detectVisionSupport(turnModel, info)
     if (support === 'no') {
       emitTurn({
         type: 'error',
-        message: `Model "${payload.model}" does not support vision/images. Switch to a vision model (e.g. llava, llama3.2-vision, gemma3) and try again.`
+        message: `Model "${turnModel}" does not support vision/images. Switch to a vision-capable model and try again.`
       })
       finish()
       return
@@ -474,6 +542,9 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   }
 
   const maxToolIterations = getMaxToolIterations()
+
+  let turnUsage = emptyTokenUsage(effective)
+  let modelCallCount = 0
 
   const completeAssistantTurn = async (
     finalContent: string,
@@ -499,13 +570,15 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       content: finalContent,
       contextUsed: used > 0 ? used : occupancyUsed(withReply, toolOverhead),
       contextLimit: contextLimit ?? undefined,
-      tokensPerSec
+      tokensPerSec,
+      tokenUsage: hasTokenUsageData(turnUsage) ? turnUsage : undefined,
+      multiCallTurn: modelCallCount > 1
     })
     try {
       const compacted = await applyCompact({
-        model: payload.model,
+        model: turnModel,
         messages: withReply,
-        limit: contextLimit,
+        limit: numCtx,
         measuredUsed: used,
         extraTokens: toolOverhead,
         signal: abort.signal,
@@ -593,15 +666,14 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         }
       }
 
-      const { content, toolCalls, promptEvalCount, evalCount, evalDurationNs } =
-        await chatStream({
-        model: payload.model,
+      const streamResult = await llm.chatStream({
+        model: turnModel,
         messages,
         tools: tools.length > 0 ? tools : undefined,
         signal: abort.signal,
-        numCtx: contextLimit,
+        numCtx,
         numPredict: replyNumPredict(
-          contextLimit,
+          numCtx,
           estimatePromptTokens(messages, toolOverhead)
         ),
         onChunk: (chunk) => {
@@ -665,6 +737,10 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           }
         }
       })
+
+      modelCallCount += 1
+      turnUsage = mergeLlmStreamUsage(turnUsage, effective, streamResult)
+      const { content, toolCalls, promptEvalCount, evalCount, evalDurationNs } = streamResult
 
       if (abort.signal.aborted || activeTurnId !== turnId) {
         if (streamEmitTimer != null) {
@@ -773,16 +849,22 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         return
       }
 
+      const toolCallsWithIds = toolCalls.map((tc) => ({
+        ...tc,
+        callId: randomUUID()
+      }))
+
       const assistantMsg: OllamaChatMessage = {
         role: 'assistant',
         content: finalContent,
-        tool_calls: toolCalls.map((tc) => ({
+        tool_calls: toolCallsWithIds.map((tc) => ({
+          id: tc.callId,
           function: { name: tc.name, arguments: tc.arguments }
         }))
       }
       messages.push(assistantMsg)
 
-      for (const tc of toolCalls) {
+      for (const tc of toolCallsWithIds) {
         const id = randomUUID()
         const shortName = tc.name.includes('__')
           ? tc.name.split('__').slice(1).join('__')
@@ -862,7 +944,8 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         messages.push({
           role: 'tool',
           content: modelResult,
-          tool_name: tc.name
+          tool_name: tc.name,
+          tool_call_id: tc.callId
         })
       }
     }
@@ -911,18 +994,13 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       }
     }
 
-    const {
-      content: wrapReply,
-      promptEvalCount: wrapPromptEval,
-      evalCount: wrapEval,
-      evalDurationNs: wrapEvalDuration
-    } = await chatStream({
-      model: payload.model,
+    const wrapStreamResult = await llm.chatStream({
+      model: turnModel,
       messages,
       signal: abort.signal,
-      numCtx: contextLimit,
+      numCtx,
       numPredict: replyNumPredict(
-        contextLimit,
+        numCtx,
         estimatePromptTokens(messages, toolOverhead)
       ),
       onChunk: (chunk) => {
@@ -940,6 +1018,15 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         }
       }
     })
+
+    modelCallCount += 1
+    turnUsage = mergeLlmStreamUsage(turnUsage, effective, wrapStreamResult)
+    const {
+      content: wrapReply,
+      promptEvalCount: wrapPromptEval,
+      evalCount: wrapEval,
+      evalDurationNs: wrapEvalDuration
+    } = wrapStreamResult
 
     if (wrapEmitTimer != null) {
       clearImmediate(wrapEmitTimer)

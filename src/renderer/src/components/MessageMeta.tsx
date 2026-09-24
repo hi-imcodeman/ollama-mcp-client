@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
+import type { TokenUsageBreakdown } from '../../../shared/types'
 import { formatTokenCount } from '../../../shared/contextUsage'
 import { contextUsageColor } from '../lib/contextUsage'
+import { formatContextTooltip } from '../lib/formatTokenUsageTooltip'
 import { useSegmentTimer } from '../hooks/useSegmentTimer'
 
 interface MessageMetaProps {
@@ -16,6 +18,8 @@ interface MessageMetaProps {
   model?: string
   contextUsed?: number
   contextLimit?: number
+  tokenUsage?: TokenUsageBreakdown
+  multiCallTurn?: boolean
   align?: 'left' | 'right'
 }
 
@@ -69,6 +73,8 @@ export function MessageMeta({
   model,
   contextUsed,
   contextLimit,
+  tokenUsage,
+  multiCallTurn,
   align = 'left'
 }: MessageMetaProps): React.JSX.Element | null {
   const time = formatMessageTime(createdAt)
@@ -159,10 +165,16 @@ export function MessageMeta({
   }
   if (hasContext) {
     const color = contextUsageColor(pct)
+    const contextTitle = formatContextTooltip({
+      contextUsed,
+      contextLimit,
+      tokenUsage,
+      multiCallTurn
+    })
     push(
       <span
         key="context"
-        title={`Context window when this reply finished: ${Math.round(contextUsed)} / ${Math.round(contextLimit)} tokens (${Math.round(pct)}%)`}
+        title={contextTitle}
         className="inline-flex items-center gap-1.5 font-mono"
         style={{ color }}
       >

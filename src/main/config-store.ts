@@ -4,7 +4,10 @@ import type {
   AppConfig,
   ChatMessage,
   ChatSession,
+  LlmProvider,
   McpServerConfig,
+  OpenAiModelEntry,
+  SelectedModelByProvider,
   SessionOrigin,
   SessionsState,
   TelegramMirrorMode,
@@ -12,9 +15,22 @@ import type {
   UiMessage
 } from '../shared/types'
 
+const DEFAULT_SELECTED_BY_PROVIDER: SelectedModelByProvider = {
+  ollama: null,
+  openai: null
+}
+
 const DEFAULT_CONFIG: AppConfig = {
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   selectedModel: null,
+  llmProvider: 'ollama',
+  openaiEnabled: false,
+  openaiApiKey: null,
+  openaiValidationOk: false,
+  openaiValidationError: null,
+  openaiModelsCatalog: [],
+  openaiModelEnabled: {},
+  selectedModelByProvider: { ...DEFAULT_SELECTED_BY_PROVIDER },
   servers: [],
   showThinking: false,
   maxToolIterations: 30,
@@ -59,10 +75,47 @@ const store = new Store<StoreSchema>({
   }
 })
 
+function readSelectedModelByProvider(): SelectedModelByProvider {
+  const stored = store.get('selectedModelByProvider') as SelectedModelByProvider | undefined
+  if (stored && typeof stored === 'object') {
+    return {
+      ollama: stored.ollama ?? null,
+      openai: stored.openai ?? null
+    }
+  }
+  const legacy = store.get('selectedModel', DEFAULT_CONFIG.selectedModel)
+  const migrated: SelectedModelByProvider = {
+    ollama: legacy,
+    openai: null
+  }
+  store.set('selectedModelByProvider', migrated)
+  return migrated
+}
+
 export function getConfig(): AppConfig {
+  const llmProvider = getLlmProvider()
+  const selectedModelByProvider = getSelectedModelByProvider()
+  const selectedModel =
+    selectedModelByProvider[llmProvider] ??
+    store.get('selectedModel', DEFAULT_CONFIG.selectedModel)
+
   return {
     ollamaBaseUrl: store.get('ollamaBaseUrl', DEFAULT_CONFIG.ollamaBaseUrl),
-    selectedModel: store.get('selectedModel', DEFAULT_CONFIG.selectedModel),
+    selectedModel,
+    llmProvider,
+    openaiEnabled: store.get('openaiEnabled', DEFAULT_CONFIG.openaiEnabled),
+    openaiApiKey: store.get('openaiApiKey', DEFAULT_CONFIG.openaiApiKey),
+    openaiValidationOk: store.get(
+      'openaiValidationOk',
+      DEFAULT_CONFIG.openaiValidationOk
+    ),
+    openaiValidationError: store.get(
+      'openaiValidationError',
+      DEFAULT_CONFIG.openaiValidationError
+    ),
+    openaiModelsCatalog: getOpenaiModelsCatalog(),
+    openaiModelEnabled: getOpenaiModelEnabledMap(),
+    selectedModelByProvider,
     servers: store.get('servers', DEFAULT_CONFIG.servers),
     showThinking: store.get('showThinking', DEFAULT_CONFIG.showThinking),
     maxToolIterations: clampMaxToolIterations(
@@ -92,12 +145,126 @@ export function setOllamaBaseUrl(url: string): string {
   return trimmed
 }
 
+export function getLlmProvider(): LlmProvider {
+  const v = store.get('llmProvider', DEFAULT_CONFIG.llmProvider)
+  return v === 'openai' ? 'openai' : 'ollama'
+}
+
+export function setLlmProvider(provider: LlmProvider): LlmProvider {
+  const next = provider === 'openai' ? 'openai' : 'ollama'
+  store.set('llmProvider', next)
+  return next
+}
+
+export function getOpenaiEnabled(): boolean {
+  return store.get('openaiEnabled', DEFAULT_CONFIG.openaiEnabled)
+}
+
+export function setOpenaiEnabled(enabled: boolean): boolean {
+  store.set('openaiEnabled', enabled)
+  return enabled
+}
+
+export function getOpenaiApiKey(): string | null {
+  return store.get('openaiApiKey', DEFAULT_CONFIG.openaiApiKey)
+}
+
+export function setOpenaiApiKey(key: string | null): string | null {
+  const trimmed = key?.trim() || null
+  store.set('openaiApiKey', trimmed)
+  if (!trimmed) {
+    setOpenaiValidationOk(false, 'API key not configured')
+  }
+  return trimmed
+}
+
+export function getOpenaiValidationState(): {
+  ok: boolean
+  error: string | null
+} {
+  return {
+    ok: store.get('openaiValidationOk', DEFAULT_CONFIG.openaiValidationOk),
+    error: store.get('openaiValidationError', DEFAULT_CONFIG.openaiValidationError)
+  }
+}
+
+export function setOpenaiValidationOk(ok: boolean, error?: string | null): void {
+  store.set('openaiValidationOk', ok)
+  store.set('openaiValidationError', ok ? null : (error ?? 'Validation failed'))
+}
+
+export function getOpenaiModelsCatalog(): OpenAiModelEntry[] {
+  return [...store.get('openaiModelsCatalog', DEFAULT_CONFIG.openaiModelsCatalog)]
+}
+
+export function setOpenaiModelsCatalog(entries: OpenAiModelEntry[]): OpenAiModelEntry[] {
+  store.set('openaiModelsCatalog', entries)
+  return entries
+}
+
+export function getOpenaiModelEnabledMap(): Record<string, boolean> {
+  return { ...store.get('openaiModelEnabled', DEFAULT_CONFIG.openaiModelEnabled) }
+}
+
+export function setOpenaiModelEnabled(id: string, enabled: boolean): Record<string, boolean> {
+  const map = getOpenaiModelEnabledMap()
+  map[id] = enabled
+  store.set('openaiModelEnabled', map)
+  return map
+}
+
+export function mergeOpenaiCatalog(entries: OpenAiModelEntry[]): OpenAiModelEntry[] {
+  const ids = new Set(entries.map((e) => e.id))
+  const enabled = getOpenaiModelEnabledMap()
+  const nextEnabled: Record<string, boolean> = {}
+  for (const id of Object.keys(enabled)) {
+    if (ids.has(id) && enabled[id]) {
+      nextEnabled[id] = true
+    }
+  }
+  for (const entry of entries) {
+    if (!(entry.id in nextEnabled)) {
+      nextEnabled[entry.id] = false
+    }
+  }
+  store.set('openaiModelEnabled', nextEnabled)
+  setOpenaiModelsCatalog(entries)
+
+  const byProvider = getSelectedModelByProvider()
+  if (byProvider.openai && !ids.has(byProvider.openai)) {
+    setSelectedModelForProvider('openai', null)
+  }
+  return entries
+}
+
+export function getSelectedModelByProvider(): SelectedModelByProvider {
+  return readSelectedModelByProvider()
+}
+
+export function getSelectedModelForProvider(provider: LlmProvider): string | null {
+  return getSelectedModelByProvider()[provider]
+}
+
+export function setSelectedModelForProvider(
+  provider: LlmProvider,
+  model: string | null
+): SelectedModelByProvider {
+  const current = readSelectedModelByProvider()
+  const next = { ...current, [provider]: model }
+  store.set('selectedModelByProvider', next)
+  if (provider === getLlmProvider()) {
+    store.set('selectedModel', model)
+  }
+  return next
+}
+
 export function getSelectedModel(): string | null {
-  return store.get('selectedModel', null)
+  const provider = getLlmProvider()
+  return getSelectedModelForProvider(provider)
 }
 
 export function setSelectedModel(model: string | null): void {
-  store.set('selectedModel', model)
+  setSelectedModelForProvider(getLlmProvider(), model)
 }
 
 export function getShowThinking(): boolean {

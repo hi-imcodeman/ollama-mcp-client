@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../shared/types'
 import { estimateChatMessagesTokens } from '../shared/contextUsage'
-import { chatOnce } from './ollama'
+import { toOllamaMessages } from './ollama'
+import { getEffectiveLlmProvider } from './llm'
 
 /** Trigger compaction when estimated usage reaches this fraction of the limit. */
 export const COMPACT_THRESHOLD = 0.75
@@ -130,12 +131,12 @@ export async function summarizeHistory(options: {
   numCtx?: number
 }): Promise<string> {
   const transcript = formatMessagesForSummary(options.older)
-  const content = await chatOnce({
+  const content = await getEffectiveLlmProvider().chatOnce({
     model: options.model,
     signal: options.signal,
     numCtx: options.numCtx,
     numPredict: 512,
-    messages: [
+    messages: toOllamaMessages([
       {
         role: 'system',
         content:
@@ -145,7 +146,7 @@ export async function summarizeHistory(options: {
         role: 'user',
         content: `Summarize this earlier conversation:\n\n${transcript}`
       }
-    ]
+    ])
   })
   if (!content) {
     throw new Error('Summarizer returned empty content')

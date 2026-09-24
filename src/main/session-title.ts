@@ -1,6 +1,7 @@
 import type { OllamaModel } from '../shared/types'
-import { getSelectedModel } from './config-store'
-import { chatOnce, listModels, modelIsImageGen } from './ollama'
+import { getSelectedModelForProvider } from './config-store'
+import { getEffectiveLlmProvider, getLlmProvider, resolveEffectiveLlmProvider } from './llm'
+import { modelIsImageGen } from './ollama'
 
 const TITLE_SYSTEM =
   'You write short chat titles. Reply with only a concise title, 3-8 words, no quotes, no trailing punctuation, no explanation.'
@@ -63,9 +64,12 @@ export async function generateSessionTitle(
   const query = prompt.replace(/\s+/g, ' ').trim().slice(0, MAX_PROMPT_CHARS)
   if (!query) return fallback
 
+  const { effective } = resolveEffectiveLlmProvider()
+  const provider = getLlmProvider(effective)
+
   let models: OllamaModel[]
   try {
-    models = await listModels()
+    models = await provider.listModelsForChat()
   } catch {
     return fallback
   }
@@ -73,9 +77,9 @@ export async function generateSessionTitle(
   const model = pickSmallestChatModel(models)
   if (!model) return fallback
 
-  const selected = getSelectedModel()
+  const selected = getSelectedModelForProvider(effective)
   try {
-    const raw = await chatOnce({
+    const raw = await getEffectiveLlmProvider().chatOnce({
       model,
       numPredict: 24,
       numCtx: 512,

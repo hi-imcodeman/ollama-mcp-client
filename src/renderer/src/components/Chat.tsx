@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AgentSkill, McpToolInfo, OllamaModel, UiMessage } from '../../../shared/types'
+import type { AgentSkill, LlmProvider, McpToolInfo, OllamaModel, UiMessage } from '../../../shared/types'
 import type { ActivityState } from './ActivityIndicator'
 import { DownloadImageButton } from './DownloadImageButton'
 import { ActivityIndicator } from './ActivityIndicator'
@@ -40,6 +40,7 @@ interface ChatProps {
   showThinking: boolean
   canSend: boolean
   readOnly?: boolean
+  llmProvider: LlmProvider
   ollamaOk: boolean
   imageGenSupported?: boolean
   models: OllamaModel[]
@@ -66,6 +67,7 @@ export function Chat({
   showThinking,
   canSend,
   readOnly = false,
+  llmProvider,
   ollamaOk,
   imageGenSupported = true,
   models,
@@ -328,7 +330,17 @@ export function Chat({
   }, [slashToken])
 
   useEffect(() => {
-    if (!selectedModel || !ollamaOk) {
+    if (!selectedModel) {
+      setModelLimit(null)
+      setModelSystem('')
+      return
+    }
+    if (llmProvider === 'openai') {
+      setModelLimit(128_000)
+      setModelSystem('')
+      return
+    }
+    if (!ollamaOk) {
       setModelLimit(null)
       setModelSystem('')
       return
@@ -350,7 +362,9 @@ export function Chat({
     return () => {
       cancelled = true
     }
-  }, [selectedModel, ollamaOk])
+  }, [selectedModel, ollamaOk, llmProvider])
+
+  const backendReady = llmProvider === 'openai' ? canSend || ollamaOk : ollamaOk
 
   const contextLimit =
     (contextUsage && contextUsage.limit > 0 ? contextUsage.limit : null) ??
@@ -515,16 +529,22 @@ export function Chat({
           </div>
           <div
             className={`flex items-center gap-1.5 text-xs ${
-              ollamaOk ? 'text-emerald-400/90' : 'text-rose-300/90'
+              backendReady ? 'text-emerald-400/90' : 'text-rose-300/90'
             }`}
           >
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
-                ollamaOk ? 'bg-emerald-400' : 'bg-rose-400'
+                backendReady ? 'bg-emerald-400' : 'bg-rose-400'
               }`}
               aria-hidden
             />
-            {ollamaOk ? 'Connected' : 'Disconnected'}
+            {llmProvider === 'openai'
+              ? backendReady
+                ? 'OpenAI ready'
+                : 'OpenAI unavailable'
+              : ollamaOk
+                ? 'Connected'
+                : 'Disconnected'}
           </div>
         </div>
         <div className="titlebar-no-drag flex gap-2">
@@ -676,6 +696,8 @@ export function Chat({
                     model={m.model}
                     contextUsed={m.streaming ? undefined : m.contextUsed}
                     contextLimit={m.streaming ? undefined : m.contextLimit}
+                    tokenUsage={m.streaming ? undefined : m.tokenUsage}
+                    multiCallTurn={m.streaming ? undefined : m.multiCallTurn}
                     align="left"
                   />
                 </div>
@@ -754,9 +776,14 @@ export function Chat({
             Telegram session — view only on desktop. Send messages from Telegram.
           </p>
         )}
-        {!ollamaOk && (
+        {llmProvider === 'ollama' && !ollamaOk && (
           <p className="mb-2 text-xs text-amber-300/90">
-            Ollama is offline — check the sidebar connection.
+            Ollama is offline — check Settings or switch to OpenAI.
+          </p>
+        )}
+        {llmProvider === 'openai' && !canSend && !readOnly && (
+          <p className="mb-2 text-xs text-amber-300/90">
+            Select an enabled OpenAI model, or validate your API key in Settings.
           </p>
         )}
         {attachError && (
@@ -890,7 +917,7 @@ export function Chat({
                     ? 'Send a message, or / for skills'
                     : 'Send a message'
             }
-            disabled={!ollamaOk}
+            disabled={!canCompose}
             className="max-h-40 min-h-[56px] w-full resize-none bg-transparent px-1 pb-12 pt-1 text-[15px] leading-relaxed text-[#e7ecf1] outline-none placeholder:text-[#6b7a8c] disabled:opacity-50"
           />
 
@@ -905,7 +932,10 @@ export function Chat({
           />
           )}
 
-          {ollamaOk && selectedModel && contextLimit && contextLimit > 0 ? (
+          {(ollamaOk || llmProvider === 'openai') &&
+          selectedModel &&
+          contextLimit &&
+          contextLimit > 0 ? (
             <ContextMeter
               used={contextUsed}
               limit={contextLimit}
@@ -919,7 +949,7 @@ export function Chat({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={!ollamaOk || busy}
+                disabled={!canCompose}
                 title="Add file"
                 className="flex h-9 w-9 items-center justify-center rounded-full bg-[#2a313a] text-[#c5d0dc] transition hover:bg-[#343c48] disabled:cursor-not-allowed disabled:opacity-40"
               >

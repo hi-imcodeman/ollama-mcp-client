@@ -5,6 +5,7 @@ import type {
   ChatSession,
   HtmlPreviewCreatePayload,
   LibrarySearchParams,
+  LlmProvider,
   McpServerConfig,
   PullProgressEvent,
   SkillImportResult,
@@ -24,16 +25,24 @@ import {
   deleteSession,
   ensureActiveSession,
   getConfig,
+  getOpenaiApiKey,
   getSchedule,
   getSelectedModel,
   getSessionsState,
   listSchedules,
   listServers,
+  mergeOpenaiCatalog,
   patchScheduleRun,
   removeServer,
   setActiveSession,
+  setLlmProvider,
   setOllamaBaseUrl,
+  setOpenaiApiKey,
+  setOpenaiEnabled,
+  setOpenaiModelEnabled,
+  setOpenaiValidationOk,
   setSelectedModel,
+  setSelectedModelForProvider,
   setServerEnabled,
   setShowThinking,
   setMaxToolIterations,
@@ -79,10 +88,33 @@ import { broadcastSessionsChanged } from './sessions-broadcast'
 import { reloadScheduleRunner, runScheduleNow } from './schedule-runner'
 import { broadcastSchedulesChanged } from './schedules-broadcast'
 import {
+  getOpenAiStatus,
+  getLlmProvider as getLlmProviderAdapter,
+  resolveEffectiveLlmProvider
+} from './llm'
+import { fetchOpenAiModels, validateOpenAiKey } from './openai-client'
+import {
   getTelegramBotStatus,
   restartTelegramBot,
   stopTelegramBot
 } from './telegram-bot'
+
+async function validateOpenAiAndFetchCatalog(): Promise<ReturnType<typeof getConfig>> {
+  const key = getOpenaiApiKey()
+  if (!key) {
+    setOpenaiValidationOk(false, 'API key not configured')
+    return getConfig()
+  }
+  const result = await validateOpenAiKey(key)
+  if (!result.ok) {
+    setOpenaiValidationOk(false, result.error ?? 'Validation failed')
+    return getConfig()
+  }
+  const models = await fetchOpenAiModels(key)
+  mergeOpenaiCatalog(models)
+  setOpenaiValidationOk(true)
+  return getConfig()
+}
 
 function emitPullProgress(event: PullProgressEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -111,9 +143,33 @@ export function registerIpc(ipcMain: IpcMain): void {
   ipcMain.handle('config:setMaxToolIterations', (_e, value: number) =>
     setMaxToolIterations(value)
   )
+  ipcMain.handle('config:setLlmProvider', (_e, provider: LlmProvider) =>
+    setLlmProvider(provider)
+  )
+  ipcMain.handle('config:setOpenaiEnabled', (_e, enabled: boolean) =>
+    setOpenaiEnabled(enabled)
+  )
+  ipcMain.handle('config:setOpenaiApiKey', (_e, key: string | null) =>
+    setOpenaiApiKey(key)
+  )
+  ipcMain.handle('config:setOpenaiModelEnabled', (_e, id: string, enabled: boolean) =>
+    setOpenaiModelEnabled(id, enabled)
+  )
+  ipcMain.handle('config:setSelectedModelForProvider', (
+    _e,
+    provider: LlmProvider,
+    model: string | null
+  ) => setSelectedModelForProvider(provider, model))
   ipcMain.handle('config:setDefaultImageModel', (_e, model: string | null) =>
     setDefaultImageModel(model)
   )
+  ipcMain.handle('openai:validateAndFetchModels', () => validateOpenAiAndFetchCatalog())
+  ipcMain.handle('openai:refreshModels', () => validateOpenAiAndFetchCatalog())
+  ipcMain.handle('openai:getStatus', () => getOpenAiStatus())
+  ipcMain.handle('openai:listChatModels', () =>
+    getLlmProviderAdapter('openai').listModelsForChat()
+  )
+  ipcMain.handle('llm:getEffectiveProvider', () => resolveEffectiveLlmProvider())
 
   ipcMain.handle('ollama:getStatus', () => getOllamaStatus())
   ipcMain.handle('ollama:listModels', () => listModels())

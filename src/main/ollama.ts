@@ -22,6 +22,7 @@ export interface OllamaTool {
 }
 
 export interface OllamaToolCall {
+  id?: string
   function: {
     name: string
     arguments: Record<string, unknown> | string
@@ -34,6 +35,8 @@ export interface OllamaChatMessage {
   images?: string[]
   tool_calls?: OllamaToolCall[]
   tool_name?: string
+  /** OpenAI tool result correlation; ignored by Ollama. */
+  tool_call_id?: string
 }
 
 export interface OllamaChatChunk {
