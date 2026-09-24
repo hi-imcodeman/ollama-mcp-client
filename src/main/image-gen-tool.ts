@@ -45,11 +45,55 @@ export function isImageModelAvailable(
   return availableModels.includes(model)
 }
 
+export interface AvailableImageModel {
+  provider: LlmProvider
+  model: string
+}
+
+export function resolveImageBackend(
+  configured: string | null,
+  available: AvailableImageModel[]
+): AvailableImageModel | null {
+  if (available.length === 0) return null
+  return (
+    available.find((entry) => entry.model === configured) ??
+    available[0] ??
+    null
+  )
+}
+
 export async function listInstalledImageModelNames(): Promise<string[]> {
   const models = await listModels()
   return models
     .filter((m) => modelIsImageGen(m.name, { capabilities: m.capabilities }))
     .map((m) => m.name)
+}
+
+export async function listAvailableImageModels(): Promise<AvailableImageModel[]> {
+  const imageModels: AvailableImageModel[] = []
+
+  const ollamaStatus = await getOllamaStatus()
+  if (ollamaStatus.ok && ollamaStatus.imageGenSupported !== false) {
+    try {
+      const names = await listInstalledImageModelNames()
+      imageModels.push(
+        ...names.map((model) => ({ provider: 'ollama' as const, model }))
+      )
+    } catch {
+      // OpenAI image models can still be used when Ollama is unavailable.
+    }
+  }
+
+  const catalog = getOpenaiModelsCatalog()
+  const enabled = getOpenaiModelEnabledMap()
+  imageModels.push(
+    ...catalog
+      .map((entry) => entry.id)
+      .filter((id) => enabled[id] === true && isOpenAiImageGenModel(id))
+      .map((model) => ({ provider: 'openai' as const, model }))
+  )
+
+  return imageModels
 }
 
 export async function listAvailableImageModelNames(
@@ -101,12 +145,11 @@ export async function shouldOfferGenerateImageTool(
     }
   }
 
-  const available = await listAvailableImageModelNames(provider)
-  if (isOpenAiImageGenModel(selectedModel)) return false
-  return (
-    !isImageModelAvailable(provider, selectedModel, available) &&
-    available.length > 0
-  )
+  const available = await listAvailableImageModels()
+  if (isOpenAiImageGenModel(selectedModel)) {
+    return false
+  }
+  return available.length > 0
 }
 
 export function generateImageToolDefinition(): OllamaTool {
@@ -145,13 +188,11 @@ export async function runGenerateImageTool(
   }
 
   try {
-    const imageNames = await listAvailableImageModelNames(provider)
-    const model = resolveImageModelForProvider(
-      provider,
+    const backend = resolveImageBackend(
       getDefaultImageModel(),
-      imageNames
+      await listAvailableImageModels()
     )
-    if (!model) {
+    if (!backend) {
       return {
         ok: false,
         message:
@@ -160,14 +201,14 @@ export async function runGenerateImageTool(
     }
 
     const imageBase64 =
-      provider === 'openai'
-        ? (await generateOpenAiImageBase64(model, prompt, signal)).b64
-        : await generateImageBase64(model, prompt, signal)
+      backend.provider === 'openai'
+        ? (await generateOpenAiImageBase64(backend.model, prompt, signal)).b64
+        : await generateImageBase64(backend.model, prompt, signal)
     return {
       ok: true,
-      model,
+      model: backend.model,
       imageBase64,
-      message: `Generated image with ${model}`
+      message: `Generated image with ${backend.model} via ${backend.provider}`
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
