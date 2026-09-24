@@ -676,6 +676,11 @@ export function Chat({
                             </div>
                           </div>
                         ))}
+                        {m.imageModel && (
+                          <div className="text-xs text-[#8b9aab]">
+                            {m.imageModel}
+                          </div>
+                        )}
                       </div>
                     )}
                     {(m.content.trim() || m.streaming) && (

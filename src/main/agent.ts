@@ -365,6 +365,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       emitTurn({
         type: 'assistant_images',
         images: [imageResult.b64],
+        imageModel: turnModel,
         mime: 'image/png',
         tokenUsage,
         contextUsed: tokenUsage?.totalTokens,
@@ -430,6 +431,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       emitTurn({
         type: 'assistant_images',
         images: [gen.imageBase64],
+        imageModel: gen.model,
         mime: 'image/png'
       })
       emitTurn({
@@ -785,6 +787,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           emitTurn({
             type: 'assistant_images',
             images: [gen.imageBase64],
+            imageModel: gen.model,
             mime: 'image/png'
           })
           emitTurn({
@@ -904,6 +907,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
               emitTurn({
                 type: 'assistant_images',
                 images: [gen.imageBase64],
+                imageModel: gen.model,
                 mime: 'image/png'
               })
               ok = true

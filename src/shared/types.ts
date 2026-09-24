@@ -272,6 +272,7 @@ export type ChatEvent =
   | {
       type: 'assistant_images'
       images: string[]
+      imageModel?: string
       mime?: string
       turnId?: string
       sessionId?: string
@@ -367,6 +368,8 @@ export type UiMessage =
       contextLimit?: number
       /** Generated image data URLs (e.g. data:image/png;base64,...). */
       images?: string[]
+      /** Model used to generate the attached images. */
+      imageModel?: string
       tokenUsage?: TokenUsageBreakdown
       multiCallTurn?: boolean
     }
