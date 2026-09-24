@@ -158,7 +158,7 @@ export function generateImageToolDefinition(): OllamaTool {
     function: {
       name: GENERATE_IMAGE_NAME,
       description:
-        'Generate an image from a text prompt using the configured image model. Call this when the user asks you to create, draw, or generate an image. Write a detailed prompt in the prompt argument.',
+        'Generate an actual image from a text prompt using the configured image model. Use this only when the user wants an image created or generated. Do not use it for writing image prompts, describing scenes, or suggesting image ideas.',
       parameters: {
         type: 'object',
         properties: {
