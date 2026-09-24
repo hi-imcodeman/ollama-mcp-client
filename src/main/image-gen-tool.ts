@@ -6,6 +6,7 @@ import {
 import { isOpenAiImageGenModel } from '../shared/openai-models'
 import type { LlmProvider } from '../shared/types'
 import { generateImageBase64 } from './ollama-image'
+import { generateOpenAiImageBase64 } from './openai-image'
 import {
   getOllamaStatus,
   listModels,
@@ -134,6 +135,7 @@ export type GenerateImageToolResult =
   | { ok: false; message: string }
 
 export async function runGenerateImageTool(
+  provider: LlmProvider,
   args: Record<string, unknown>,
   signal?: AbortSignal
 ): Promise<GenerateImageToolResult> {
@@ -141,16 +143,26 @@ export async function runGenerateImageTool(
   if (!prompt) {
     return { ok: false, message: 'Missing required argument: prompt' }
   }
-  const imageNames = await listInstalledImageModelNames()
-  const model = resolveDefaultImageModel(getDefaultImageModel(), imageNames)
-  if (!model) {
-    return {
-      ok: false,
-      message: 'No image models installed. Install an image model to generate images.'
-    }
-  }
+
   try {
-    const imageBase64 = await generateImageBase64(model, prompt, signal)
+    const imageNames = await listAvailableImageModelNames(provider)
+    const model = resolveImageModelForProvider(
+      provider,
+      getDefaultImageModel(),
+      imageNames
+    )
+    if (!model) {
+      return {
+        ok: false,
+        message:
+          'No image models installed. Install an image model to generate images.'
+      }
+    }
+
+    const imageBase64 =
+      provider === 'openai'
+        ? (await generateOpenAiImageBase64(model, prompt, signal)).b64
+        : await generateImageBase64(model, prompt, signal)
     return {
       ok: true,
       model,

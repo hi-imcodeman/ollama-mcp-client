@@ -387,7 +387,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
 
   const skillTool = loadSkillTool()
   const baseTools = [...(skillTool ? [skillTool] : []), ...toolsFromMcp()]
-  const offerImageTool = await shouldOfferGenerateImageTool(turnModel)
+  const offerImageTool = await shouldOfferGenerateImageTool(effective, turnModel)
   const tools = offerImageTool
     ? [...baseTools, generateImageToolDefinition()]
     : baseTools
@@ -422,6 +422,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
       detail: 'Generating image…'
     })
     const gen = await runGenerateImageTool(
+      effective,
       { prompt: lastUserPrompt },
       abort.signal
     )
@@ -776,6 +777,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           detail: 'Generating image…'
         })
         const gen = await runGenerateImageTool(
+          effective,
           { prompt: lastUserPrompt },
           abort.signal
         )
@@ -893,7 +895,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
             phase: 'generating',
             detail: 'Generating image…'
           })
-          const gen = await runGenerateImageTool(tc.arguments, abort.signal)
+          const gen = await runGenerateImageTool(effective, tc.arguments, abort.signal)
           if (gen.ok) {
             if (abort.signal.aborted || activeTurnId !== turnId) {
               ok = false
