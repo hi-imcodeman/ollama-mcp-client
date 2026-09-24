@@ -145,6 +145,15 @@ export async function shouldOfferGenerateImageTool(
     }
   }
 
+  const catalog = getOpenaiModelsCatalog()
+  const enabled = getOpenaiModelEnabledMap()
+  const hasEnabledOpenAiImageModel = catalog.some(
+    (entry) => enabled[entry.id] === true && isOpenAiImageGenModel(entry.id)
+  )
+  if (hasEnabledOpenAiImageModel) {
+    return !isOpenAiImageGenModel(selectedModel)
+  }
+
   const available = await listAvailableImageModels()
   if (isOpenAiImageGenModel(selectedModel)) {
     return false
