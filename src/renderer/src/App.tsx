@@ -14,6 +14,7 @@ import type {
   TelegramStatus,
   UiMessage
 } from '../../shared/types'
+import { isOpenAiImageGenModel } from '../../shared/openai-models'
 import type { ServerWithStatus } from '../../preload/index'
 import type { ActivityState } from './components/ActivityIndicator'
 import { Chat } from './components/Chat'
@@ -1287,6 +1288,23 @@ export default function App(): React.JSX.Element {
     openaiStatus.validationOk && openaiStatus.enabledCount > 0
   const canSendBackend =
     llmProvider === 'openai' ? openAiChatReady || ollamaOk : ollamaOk
+  const imageModelNames = [
+    ...new Set([
+      ...models
+        .filter(
+          (m) =>
+            m.tags?.some((t) => t.toLowerCase() === 'image') ||
+            m.capabilities?.some((c) => c.toLowerCase() === 'image') ||
+            /z-image|flux|sdxl|stable-diffusion|stable_diffusion|imagen|dreamshaper|animagine/i.test(
+              m.name
+            )
+        )
+        .map((m) => m.name),
+      ...openaiCatalog
+        .filter((m) => openaiModelEnabled[m.id] && isOpenAiImageGenModel(m.id))
+        .map((m) => m.id)
+    ])
+  ]
 
   const handleNavigate = (
     target: 'chat' | 'models' | 'mcp' | 'skills' | 'schedules' | 'settings'
@@ -1415,7 +1433,7 @@ export default function App(): React.JSX.Element {
             showThinking={showThinking}
             maxToolIterations={maxToolIterations}
             defaultImageModel={defaultImageModel}
-            models={models}
+            imageModelNames={imageModelNames}
             imageGenSupported={imageGenSupported}
             telegramEnabled={telegramEnabled}
             telegramAllowedUserIds={telegramAllowedUserIds}
