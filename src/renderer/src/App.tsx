@@ -64,6 +64,7 @@ export default function App(): React.JSX.Element {
   const [servers, setServers] = useState<ServerWithStatus[]>([])
   const [tools, setTools] = useState<McpToolInfo[]>([])
   const [models, setModels] = useState<OllamaModel[]>([])
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([])
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const [ollamaOk, setOllamaOk] = useState(false)
   const [ollamaError, setOllamaError] = useState<string | undefined>()
@@ -368,14 +369,22 @@ export default function App(): React.JSX.Element {
         } catch {
           setModels([])
         }
+        try {
+          const status = await window.api.ollama.getStatus()
+          setOllamaModels(status.ok ? await window.api.ollama.listModels() : [])
+        } catch {
+          setOllamaModels([])
+        }
         return
       }
       const status = await window.api.ollama.getStatus()
       if (!status.ok) {
+        setOllamaModels([])
         setModels([])
         return
       }
       const list = await window.api.ollama.listModels()
+      setOllamaModels(list)
       setModels(list)
       const names = list.map((m) => m.name)
       setSelectedModel((current) => {
@@ -418,17 +427,32 @@ export default function App(): React.JSX.Element {
     setOllamaError(status.error)
     setBaseUrl(status.baseUrl)
     setImageGenSupported(status.imageGenSupported !== false)
-    if (status.ok && llmProvider === 'ollama') {
+    if (status.ok) {
       try {
-        await refreshModelsForProvider('ollama')
+        const list = await window.api.ollama.listModels()
+        setOllamaModels(list)
+        if (llmProvider === 'ollama') {
+          setModels(list)
+          const names = list.map((m) => m.name)
+          setSelectedModel((current) => {
+            if (current && names.includes(current)) return current
+            const next = names[0] ?? null
+            if (next) {
+              void window.api.setSelectedModelForProvider('ollama', next)
+            }
+            return next
+          })
+        }
       } catch (err) {
+        setOllamaModels([])
         setOllamaOk(false)
         setOllamaError(err instanceof Error ? err.message : String(err))
       }
-    } else if (llmProvider === 'ollama') {
+    } else {
+      setOllamaModels([])
       setModels([])
     }
-  }, [llmProvider, refreshModelsForProvider])
+  }, [llmProvider])
 
   useEffect(() => {
     void (async () => {
@@ -1290,7 +1314,7 @@ export default function App(): React.JSX.Element {
     llmProvider === 'openai' ? openAiChatReady || ollamaOk : ollamaOk
   const imageModelNames = [
     ...new Set([
-      ...models
+      ...ollamaModels
         .filter(
           (m) =>
             m.tags?.some((t) => t.toLowerCase() === 'image') ||
@@ -1434,7 +1458,6 @@ export default function App(): React.JSX.Element {
             maxToolIterations={maxToolIterations}
             defaultImageModel={defaultImageModel}
             imageModelNames={imageModelNames}
-            imageGenSupported={imageGenSupported}
             telegramEnabled={telegramEnabled}
             telegramAllowedUserIds={telegramAllowedUserIds}
             telegramStatus={telegramStatus}

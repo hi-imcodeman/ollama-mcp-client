@@ -13,7 +13,6 @@ interface SettingsProps {
   maxToolIterations: number
   defaultImageModel: string | null
   imageModelNames: string[]
-  imageGenSupported: boolean
   telegramEnabled: boolean
   telegramAllowedUserIds: number[]
   telegramStatus: TelegramStatus
@@ -45,7 +44,6 @@ export function Settings({
   maxToolIterations,
   defaultImageModel,
   imageModelNames,
-  imageGenSupported,
   telegramEnabled,
   telegramAllowedUserIds,
   telegramStatus,
@@ -372,13 +370,9 @@ export function Settings({
                 Used when a chat model calls generate_image. Auto picks the first available
                 image model.
               </span>
-              {imageModelNames.length === 0 && !imageGenSupported ? (
-                <p className="text-xs text-amber-300/90">
-                  This Ollama build does not support image generation.
-                </p>
-              ) : imageModelNames.length === 0 ? (
+              {imageModelNames.length === 0 ? (
                 <p className="text-xs text-[#6b7a8c]">
-                  No image models installed — image generation disabled until you install one.
+                  No image models available — image generation is disabled until one is available.
                 </p>
               ) : (
                 <select
