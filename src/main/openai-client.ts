@@ -11,6 +11,7 @@ export function isChatModelId(id: string): boolean {
   if (lower.startsWith('whisper-')) return false
   if (lower.startsWith('tts-')) return false
   if (lower.startsWith('dall-e-')) return false
+  if (lower.startsWith('gpt-image-')) return false
   if (lower.includes('realtime')) return false
   return true
 }
