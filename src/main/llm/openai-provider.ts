@@ -6,6 +6,7 @@ import {
 } from '../config-store'
 import {
   fetchOpenAiChatModels,
+  isChatModelId,
   openAiChatOnce,
   openAiChatStream
 } from '../openai-client'
@@ -68,6 +69,7 @@ export const openaiLlmProvider: LlmProvider = {
     const catalog = getOpenaiModelsCatalog()
     const enabled = getOpenaiModelEnabledMap()
     return catalog
+      .filter((m) => isChatModelId(m.id))
       .filter((m) => enabled[m.id])
       .map((m) => ({
         name: m.id,

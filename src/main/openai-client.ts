@@ -40,7 +40,6 @@ export async function fetchOpenAiModels(apiKey: string): Promise<OpenAiModelEntr
     data?: Array<{ id: string; owned_by?: string; created?: number }>
   }
   return (data.data ?? [])
-    .filter((m) => isChatModelId(m.id))
     .map((m) => ({ id: m.id, ownedBy: m.owned_by, created: m.created }))
     .sort((a, b) => a.id.localeCompare(b.id))
 }
@@ -59,7 +58,8 @@ export async function validateOpenAiKey(
 export async function fetchOpenAiChatModels(): Promise<OpenAiModelEntry[]> {
   const key = getOpenaiApiKey()
   if (!key) throw new Error('OpenAI API key not configured')
-  return fetchOpenAiModels(key)
+  const models = await fetchOpenAiModels(key)
+  return models.filter((m) => isChatModelId(m.id))
 }
 
 export type OpenAiChatMessage =
@@ -301,6 +301,53 @@ export async function openAiChatStream(options: {
   const decoder = new TextDecoder()
   let buffer = ''
 
+  const processLine = (line: string): void => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (payload === '[DONE]') return
+    try {
+      const chunk = JSON.parse(payload) as {
+        choices?: Array<{
+          delta?: {
+            content?: string
+            tool_calls?: Array<{
+              index?: number
+              id?: string
+              function?: { name?: string; arguments?: string }
+            }>
+          }
+        }>
+        usage?: unknown
+      }
+      const delta = chunk.choices?.[0]?.delta
+      if (delta?.content) content += delta.content
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0
+          let acc = toolCallsByIndex.get(idx)
+          if (!acc) {
+            acc = { id: tc.id ?? `call_${idx}`, name: '', arguments: '' }
+            toolCallsByIndex.set(idx, acc)
+          }
+          if (tc.id) acc.id = tc.id
+          if (tc.function?.name) acc.name = tc.function.name
+          if (tc.function?.arguments) acc.arguments += tc.function.arguments
+        }
+      }
+      if (chunk.usage) {
+        const parsed = parseOpenAiUsageFromJson(chunk.usage)
+        if (parsed) {
+          usage = parsed
+          promptEvalCount = parsed.promptTokens
+          evalCount = parsed.completionTokens
+        }
+      }
+    } catch {
+      // skip malformed SSE lines
+    }
+  }
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -308,52 +355,11 @@ export async function openAiChatStream(options: {
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
     for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed.startsWith('data:')) continue
-      const payload = trimmed.slice(5).trim()
-      if (payload === '[DONE]') continue
-      try {
-        const chunk = JSON.parse(payload) as {
-          choices?: Array<{
-            delta?: {
-              content?: string
-              tool_calls?: Array<{
-                index?: number
-                id?: string
-                function?: { name?: string; arguments?: string }
-              }>
-            }
-          }>
-          usage?: unknown
-        }
-        const delta = chunk.choices?.[0]?.delta
-        if (delta?.content) content += delta.content
-        if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0
-            let acc = toolCallsByIndex.get(idx)
-            if (!acc) {
-              acc = { id: tc.id ?? `call_${idx}`, name: '', arguments: '' }
-              toolCallsByIndex.set(idx, acc)
-            }
-            if (tc.id) acc.id = tc.id
-            if (tc.function?.name) acc.name = tc.function.name
-            if (tc.function?.arguments) acc.arguments += tc.function.arguments
-          }
-        }
-        if (chunk.usage) {
-          const parsed = parseOpenAiUsageFromJson(chunk.usage)
-          if (parsed) {
-            usage = parsed
-            promptEvalCount = parsed.promptTokens
-            evalCount = parsed.completionTokens
-          }
-        }
-      } catch {
-        // skip malformed SSE lines
-      }
+      processLine(line)
     }
   }
+  buffer += decoder.decode()
+  if (buffer) processLine(buffer)
 
   const toolCalls = [...toolCallsByIndex.entries()]
     .sort(([a], [b]) => a - b)

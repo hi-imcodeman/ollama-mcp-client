@@ -7,6 +7,13 @@ export interface OpenAiImageGenerateResult {
   usage?: OpenAiUsageDetails
 }
 
+function normalizeBase64(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) return undefined
+  const match = value.match(/^data:image\/[^;]+;base64,(.+)$/)
+  if (value.startsWith('http://') || value.startsWith('https://')) return undefined
+  return match?.[1] ?? value
+}
+
 function extractBase64FromResponsesBody(data: unknown): string | undefined {
   if (!data || typeof data !== 'object') return undefined
   const root = data as Record<string, unknown>
@@ -18,25 +25,16 @@ function extractBase64FromResponsesBody(data: unknown): string | undefined {
     const entry = item as Record<string, unknown>
     const type = String(entry.type ?? '')
     if (type === 'image_generation_call') {
-      if (typeof entry.result === 'string' && entry.result.length > 0) {
-        return entry.result
-      }
-      if (typeof entry.b64_json === 'string' && entry.b64_json.length > 0) {
-        return entry.b64_json
-      }
+      const result = normalizeBase64(entry.result) ?? normalizeBase64(entry.b64_json)
+      if (result) return result
     }
     if (type === 'message' && Array.isArray(entry.content)) {
       for (const part of entry.content) {
         if (!part || typeof part !== 'object') continue
         const p = part as Record<string, unknown>
-        if (p.type === 'output_image' && typeof p.image_url === 'string') {
-          const url = p.image_url
-          const m = url.match(/^data:image\/[^;]+;base64,(.+)$/)
-          if (m?.[1]) return m[1]
-        }
-        if (typeof p.b64_json === 'string' && p.b64_json.length > 0) {
-          return p.b64_json
-        }
+        const image = normalizeBase64(p.image_url) ?? normalizeBase64(p.b64_json)
+        if (p.type === 'output_image' && image) return image
+        if (image) return image
       }
     }
   }
@@ -49,18 +47,22 @@ async function openAiImagesGenerate(
   apiKey: string,
   signal?: AbortSignal
 ): Promise<OpenAiImageGenerateResult> {
+  const body: Record<string, unknown> = {
+    model,
+    prompt,
+    n: 1
+  }
+  if (model.toLowerCase().startsWith('dall-e-')) {
+    body.response_format = 'b64_json'
+  }
+
   const res = await fetch(`${OPENAI_BASE}/images/generations`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      model,
-      prompt,
-      n: 1,
-      response_format: 'b64_json'
-    }),
+    body: JSON.stringify(body),
     signal
   })
   if (!res.ok) {
@@ -68,10 +70,11 @@ async function openAiImagesGenerate(
     throw new Error(formatOpenAiError(text, res.status))
   }
   const data = (await res.json()) as {
-    data?: Array<{ b64_json?: string }>
+    data?: Array<{ b64_json?: unknown; url?: unknown }>
     usage?: unknown
   }
-  const b64 = data.data?.[0]?.b64_json
+  const first = data.data?.[0]
+  const b64 = normalizeBase64(first?.b64_json) ?? normalizeBase64(first?.url)
   if (!b64) throw new Error('Image API returned no image data')
   return { b64, usage: parseOpenAiUsageFromJson(data.usage) }
 }

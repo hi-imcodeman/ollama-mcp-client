@@ -7,6 +7,7 @@ import {
   getOpenaiModelsCatalog,
   getOpenaiValidationState
 } from '../config-store'
+import { isChatModelId } from '../openai-client'
 
 export interface EffectiveLlmProviderResult {
   configured: LlmProvider
@@ -57,7 +58,7 @@ export function getOpenAiStatus(): OpenAiStatus {
   const { ok, error } = getOpenaiValidationState()
   const catalog = getOpenaiModelsCatalog()
   const enabledMap = getOpenaiModelEnabledMap()
-  const enabledCount = catalog.filter((m) => enabledMap[m.id]).length
+  const enabledCount = catalog.filter((m) => isChatModelId(m.id) && enabledMap[m.id]).length
   return {
     enabled,
     validationOk: ok,
