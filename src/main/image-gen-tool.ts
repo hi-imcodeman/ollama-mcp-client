@@ -55,14 +55,16 @@ export interface AvailableImageModel {
 
 export function resolveImageBackend(
   configured: string | null,
-  available: AvailableImageModel[]
+  available: AvailableImageModel[],
+  fallbackProvider?: LlmProvider
 ): AvailableImageModel | null {
   if (available.length === 0) return null
-  return (
-    available.find((entry) => entry.model === configured) ??
-    available[0] ??
-    null
-  )
+  const configuredEntry = available.find((entry) => entry.model === configured)
+  if (configuredEntry) return configuredEntry
+  if (fallbackProvider) {
+    return available.find((entry) => entry.provider === fallbackProvider) ?? null
+  }
+  return available[0] ?? null
 }
 
 export async function listInstalledImageModelNames(): Promise<string[]> {
@@ -157,7 +159,7 @@ export async function shouldOfferGenerateImageTool(
     return !isOpenAiImageGenModel(selectedModel)
   }
 
-  const available = await listAvailableImageModels()
+  const available = await listAvailableImageModelNames(provider)
   if (isOpenAiImageGenModel(selectedModel)) {
     return false
   }
@@ -218,7 +220,8 @@ export async function runGenerateImageTool(
   try {
     const backend = resolveImageBackend(
       getDefaultImageModel(),
-      await listAvailableImageModels()
+      await listAvailableImageModels(),
+      provider
     )
     if (!backend) {
       return {

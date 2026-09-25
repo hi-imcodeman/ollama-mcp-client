@@ -77,7 +77,7 @@ test('sends multiple source images as ordered multipart image parts', async () =
   try {
     const result = await editOpenAiImageBase64('gpt-image-1', 'combine them', [
       'Zmlyc3Q=',
-      'c2Vjb25k='
+      'c2Vjb25k'
     ])
     assert.equal(result.b64, 'combined-image')
     const images = request.body.getAll('image')
@@ -107,6 +107,26 @@ test('formats edit API errors and forwards abort signals', async () => {
       /edit rejected/
     )
     assert.equal(request.signal, controller.signal)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('rejects malformed raw base64 before uploading an image', async () => {
+  setOpenaiApiKey('test-key')
+  const originalFetch = globalThis.fetch
+  let fetchCalled = false
+  globalThis.fetch = async (...args) => {
+    fetchCalled = true
+    return mockResponse({ data: [{ b64_json: 'unexpected' }] })
+  }
+
+  try {
+    await assert.rejects(
+      editOpenAiImageBase64('gpt-image-1', 'edit', ['not-valid-base64']),
+      /valid base64/
+    )
+    assert.equal(fetchCalled, false)
   } finally {
     globalThis.fetch = originalFetch
   }

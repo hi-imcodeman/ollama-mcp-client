@@ -8,7 +8,11 @@ const server = await createServer({
   appType: 'custom'
 })
 
-const { generateImageToolDefinition, runGenerateImageTool } =
+const {
+  generateImageToolDefinition,
+  runGenerateImageTool,
+  shouldOfferGenerateImageTool
+} =
   await server.ssrLoadModule(
     new URL('../src/main/image-gen-tool.ts', import.meta.url).pathname
   )
@@ -61,7 +65,7 @@ test('routes deduplicated source images to OpenAI editing', async () => {
   try {
     const result = await runGenerateImageTool('openai', {
       prompt: 'remove the background',
-      images: ['Zmlyc3Q=', 'c2Vjb25k=', 'Zmlyc3Q=']
+      images: ['Zmlyc3Q=', 'c2Vjb25k', 'Zmlyc3Q=']
     })
     assert.deepEqual(result, {
       ok: true,
@@ -97,6 +101,86 @@ test('rejects invalid image arguments with a clear failure', async () => {
       ok: false,
       message: 'Source images must be non-empty strings'
     })
+  }
+})
+
+test('does not fall back to the other provider when the configured model is stale', async () => {
+  setOpenaiModelsCatalog([{ id: 'gpt-image-1', name: 'gpt-image-1' }])
+  setOpenaiModelEnabled('gpt-image-1', true)
+  setDefaultImageModel('missing-image-model')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (...args) => {
+    const url = String(args[0])
+    if (url.endsWith('/api/tags')) {
+      return response({
+        models: [{ name: 'flux', details: { families: ['diffusion'] } }]
+      })
+    }
+    if (url.endsWith('/api/version')) return response({ version: '0.1.0' })
+    if (url.endsWith('/images/generations')) {
+      return response({ data: [{ b64_json: 'openai-image' }] })
+    }
+    if (url.endsWith('/api/generate')) {
+      return response({ image: Buffer.alloc(1024, 7).toString('base64') })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  try {
+    const openaiResult = await runGenerateImageTool('openai', { prompt: 'a test image' })
+    assert.equal(openaiResult.ok, true)
+    assert.equal(openaiResult.model, 'gpt-image-1')
+
+    const ollamaResult = await runGenerateImageTool('ollama', { prompt: 'a test image' })
+    assert.equal(ollamaResult.ok, true)
+    assert.equal(ollamaResult.model, 'flux')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('keeps image tool availability scoped to the active provider', async () => {
+  setOpenaiModelsCatalog([])
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (...args) => {
+    if (String(args[0]).endsWith('/api/tags')) {
+      return response({
+        models: [{ name: 'flux', details: { families: ['diffusion'] } }]
+      })
+    }
+    return response({ version: '0.1.0' })
+  }
+
+  try {
+    assert.equal(await shouldOfferGenerateImageTool('openai', 'llama3.2'), false)
+    assert.equal(await shouldOfferGenerateImageTool('ollama', 'llama3.2'), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('rejects malformed base64 before attempting OpenAI editing', async () => {
+  setOpenaiApiKey('test-key')
+  setOpenaiModelsCatalog([{ id: 'gpt-image-1', name: 'gpt-image-1' }])
+  setOpenaiModelEnabled('gpt-image-1', true)
+  setDefaultImageModel('gpt-image-1')
+  const originalFetch = globalThis.fetch
+  let fetchCalled = false
+  globalThis.fetch = async (...args) => {
+    fetchCalled = String(args[0]).endsWith('/images/edits')
+    return response({ data: [{ b64_json: 'unexpected' }] })
+  }
+
+  try {
+    const result = await runGenerateImageTool('openai', {
+      prompt: 'edit this',
+      images: ['not-valid-base64']
+    })
+    assert.equal(result.ok, false)
+    assert.match(result.message, /valid base64/)
+    assert.equal(fetchCalled, false)
+  } finally {
+    globalThis.fetch = originalFetch
   }
 })
 

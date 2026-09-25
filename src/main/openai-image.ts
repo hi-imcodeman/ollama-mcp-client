@@ -14,6 +14,21 @@ function normalizeBase64(value: unknown): string | undefined {
   return match?.[1] ?? value
 }
 
+function decodeRawBase64Image(value: string): Buffer {
+  if (
+    value.length === 0 ||
+    value.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  ) {
+    throw new Error('Source images must contain valid base64 payloads')
+  }
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.length === 0) {
+    throw new Error('Source images must contain valid base64 payloads')
+  }
+  return bytes
+}
+
 function extractBase64FromResponsesBody(data: unknown): string | undefined {
   if (!data || typeof data !== 'object') return undefined
   const root = data as Record<string, unknown>
@@ -102,11 +117,12 @@ export async function editOpenAiImageBase64(
     if (typeof image !== 'string' || !image) {
       throw new Error('Source images must be non-empty base64 payloads')
     }
-    const bytes = Buffer.from(image, 'base64')
-    if (bytes.length === 0) {
-      throw new Error('Source images must be non-empty base64 payloads')
-    }
-    form.append('image', new Blob([bytes], { type: 'image/png' }), 'image.png')
+    const bytes = decodeRawBase64Image(image)
+    const imageBytes = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength
+    ) as ArrayBuffer
+    form.append('image', new Blob([imageBytes], { type: 'image/png' }), 'image.png')
   }
 
   const res = await fetch(`${OPENAI_BASE}/images/edits`, {
