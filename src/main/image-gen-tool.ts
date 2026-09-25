@@ -19,19 +19,6 @@ import {
 
 export const GENERATE_IMAGE_NAME = 'generate_image'
 
-export function mergeGenerateImageToolArguments(
-  args: Record<string, unknown>,
-  currentTurnImages: string[]
-): Record<string, unknown> {
-  if (currentTurnImages.length === 0) return args
-
-  const modelImages = Array.isArray(args.images) ? args.images : []
-  return {
-    ...args,
-    images: [...new Set([...modelImages, ...currentTurnImages])]
-  }
-}
-
 /** Pure: pick configured model if still in list, else first, else null. */
 export function resolveDefaultImageModel(
   configured: string | null,
