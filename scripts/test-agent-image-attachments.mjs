@@ -29,7 +29,7 @@ const { mergeGenerateImageToolArguments } = await server.ssrLoadModule(
 
 after(() => server.close())
 
-test('merges only current-turn images with model images and deduplicates exact payloads', () => {
+test('passes current-turn attachments through the generate_image tool boundary', () => {
   const result = mergeGenerateImageToolArguments(
     { prompt: 'combine these', images: ['model-image', 'current-image'] },
     ['current-image', 'second-current-image']
@@ -38,5 +38,17 @@ test('merges only current-turn images with model images and deduplicates exact p
   assert.deepEqual(result, {
     prompt: 'combine these',
     images: ['model-image', 'current-image', 'second-current-image']
+  })
+})
+
+test('injects current-turn attachments when model images are malformed', () => {
+  const result = mergeGenerateImageToolArguments(
+    { prompt: 'edit this', images: 'not-an-array' },
+    ['first-current-image', 'second-current-image']
+  )
+
+  assert.deepEqual(result, {
+    prompt: 'edit this',
+    images: ['first-current-image', 'second-current-image']
   })
 })

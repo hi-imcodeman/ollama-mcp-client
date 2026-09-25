@@ -24,7 +24,6 @@ export function mergeGenerateImageToolArguments(
   currentTurnImages: string[]
 ): Record<string, unknown> {
   if (currentTurnImages.length === 0) return args
-  if (args.images !== undefined && !Array.isArray(args.images)) return args
 
   const modelImages = Array.isArray(args.images) ? args.images : []
   return {
