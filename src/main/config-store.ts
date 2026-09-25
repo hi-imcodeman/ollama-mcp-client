@@ -75,6 +75,34 @@ const store = new Store<StoreSchema>({
   }
 })
 
+let sessionsCache: ChatSession[] | null = null
+let activeSessionIdCache: string | null | undefined
+let telegramActiveSessionIdCache: string | null | undefined
+let sessionPersistTimer: ReturnType<typeof setTimeout> | null = null
+
+function cachedSessions(): ChatSession[] {
+  if (!sessionsCache) {
+    sessionsCache = store
+      .get('sessions', [])
+      .map(normalizeSession)
+      .map(withActivityTimestamp)
+  }
+  return sessionsCache
+}
+
+function scheduleSessionsPersist(): void {
+  if (sessionPersistTimer !== null) return
+  sessionPersistTimer = setTimeout(() => {
+    sessionPersistTimer = null
+    store.store = {
+      ...store.store,
+      sessions: sessionsCache ?? [],
+      activeSessionId: activeSessionIdCache ?? null,
+      telegramActiveSessionId: telegramActiveSessionIdCache ?? null
+    }
+  }, 100)
+}
+
 function readSelectedModelByProvider(): SelectedModelByProvider {
   const stored = store.get('selectedModelByProvider') as SelectedModelByProvider | undefined
   if (stored && typeof stored === 'object') {
@@ -417,16 +445,21 @@ function sortSessions(sessions: ChatSession[]): ChatSession[] {
 }
 
 export function listSessions(): ChatSession[] {
-  const sessions = store.get('sessions', []).map(normalizeSession).map(withActivityTimestamp)
-  return sortSessions(sessions)
+  return sortSessions(cachedSessions())
 }
 
 export function getActiveSessionId(): string | null {
-  return store.get('activeSessionId', null)
+  if (activeSessionIdCache === undefined) {
+    activeSessionIdCache = store.get('activeSessionId', null)
+  }
+  return activeSessionIdCache
 }
 
 export function getTelegramActiveSessionId(): string | null {
-  return store.get('telegramActiveSessionId', null)
+  if (telegramActiveSessionIdCache === undefined) {
+    telegramActiveSessionIdCache = store.get('telegramActiveSessionId', null)
+  }
+  return telegramActiveSessionIdCache
 }
 
 function ensureDesktopSessionExists(): void {
@@ -443,7 +476,8 @@ function ensureDesktopSessionExists(): void {
     history: [],
     origin: 'desktop'
   }
-  store.set('sessions', [session, ...sessions])
+  sessionsCache = [session, ...sessions]
+  scheduleSessionsPersist()
 }
 
 export function getSessionsState(): SessionsState {
@@ -454,7 +488,8 @@ export function getSessionsState(): SessionsState {
   if (activeSessionId && !sessions.some((s) => s.id === activeSessionId)) {
     const desktopSessions = sessions.filter(isDesktopSession)
     activeSessionId = desktopSessions[0]?.id ?? sessions[0]?.id ?? null
-    store.set('activeSessionId', activeSessionId)
+    activeSessionIdCache = activeSessionId
+    scheduleSessionsPersist()
   }
 
   const telegramSessions = sessions.filter(isTelegramSession)
@@ -463,7 +498,8 @@ export function getSessionsState(): SessionsState {
     !telegramSessions.some((s) => s.id === telegramActiveSessionId)
   ) {
     telegramActiveSessionId = telegramSessions[0]?.id ?? null
-    store.set('telegramActiveSessionId', telegramActiveSessionId)
+    telegramActiveSessionIdCache = telegramActiveSessionId
+    scheduleSessionsPersist()
   }
 
   return { sessions, activeSessionId, telegramActiveSessionId }
@@ -481,12 +517,13 @@ export function createSession(origin: SessionOrigin = 'desktop'): ChatSession {
     origin
   }
   const sessions = [session, ...listSessions()]
-  store.set('sessions', sessions)
+  sessionsCache = sessions
   if (origin === 'telegram') {
-    store.set('telegramActiveSessionId', session.id)
+    telegramActiveSessionIdCache = session.id
   } else {
-    store.set('activeSessionId', session.id)
+    activeSessionIdCache = session.id
   }
+  scheduleSessionsPersist()
   return session
 }
 
@@ -495,7 +532,8 @@ export function setTelegramActiveSession(id: string): SessionsState {
   if (!session || !isTelegramSession(session)) {
     throw new Error('Telegram session not found')
   }
-  store.set('telegramActiveSessionId', id)
+  telegramActiveSessionIdCache = id
+  scheduleSessionsPersist()
   return getSessionsState()
 }
 
@@ -504,7 +542,8 @@ export function setActiveSession(id: string): SessionsState {
   if (!sessions.some((s) => s.id === id)) {
     throw new Error('Session not found')
   }
-  store.set('activeSessionId', id)
+  activeSessionIdCache = id
+  scheduleSessionsPersist()
   return getSessionsState()
 }
 
@@ -527,7 +566,8 @@ export function updateSession(
     updatedAt: lastMessageCreatedAt(nextMessages) ?? sessions[idx].createdAt
   }
   sessions[idx] = updated
-  store.set('sessions', sessions)
+  sessionsCache = sessions
+  scheduleSessionsPersist()
   return updated
 }
 
@@ -562,9 +602,10 @@ export function deleteSession(id: string): SessionsState {
     telegramActiveSessionId = null
   }
 
-  store.set('sessions', sessions)
-  store.set('activeSessionId', activeSessionId)
-  store.set('telegramActiveSessionId', telegramActiveSessionId)
+  sessionsCache = sessions
+  activeSessionIdCache = activeSessionId
+  telegramActiveSessionIdCache = telegramActiveSessionId
+  scheduleSessionsPersist()
   return getSessionsState()
 }
 

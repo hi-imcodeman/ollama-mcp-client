@@ -60,6 +60,13 @@ function titleFromPrompt(text: string): string {
   return cleaned.length > 40 ? `${cleaned.slice(0, 40)}…` : cleaned
 }
 
+type SessionPersistenceSnapshot = {
+  id: string
+  messages: UiMessage[]
+  history: ChatMessage[]
+  title: string
+}
+
 export default function App(): React.JSX.Element {
   const [servers, setServers] = useState<ServerWithStatus[]>([])
   const [tools, setTools] = useState<McpToolInfo[]>([])
@@ -1154,37 +1161,65 @@ export default function App(): React.JSX.Element {
     if (sessionId) void writeSession(sessionId, [], [], 'New chat')
   }
 
-  const leaveCurrentSession = useCallback(async (): Promise<void> => {
-    const sessionId = activeSessionIdRef.current
-    if (sessionId && activeTurnIdRef.current) {
-      backgroundSessionsRef.current.set(
-        sessionId,
-        createBackgroundSessionTurn(
-          messagesRef.current,
-          historyRef.current,
-          turnModelRef.current
+  const leaveCurrentSession = useCallback(
+    async (options?: {
+      persist?: boolean
+    }): Promise<SessionPersistenceSnapshot | null> => {
+      if (persistTimer.current !== null) {
+        window.clearTimeout(persistTimer.current)
+        persistTimer.current = null
+      }
+      const sessionId = activeSessionIdRef.current
+      if (sessionId && activeTurnIdRef.current) {
+        backgroundSessionsRef.current.set(
+          sessionId,
+          createBackgroundSessionTurn(
+            messagesRef.current,
+            historyRef.current,
+            turnModelRef.current
+          )
         )
-      )
-    }
-    bumpChatEpoch()
-    activeTurnIdRef.current = null
-    setBusy(false)
-    setActivity(IDLE_ACTIVITY)
-    setContextUsage(null)
-    await flushActiveSession()
-  }, [bumpChatEpoch, flushActiveSession])
+      }
+      bumpChatEpoch()
+      activeTurnIdRef.current = null
+      setBusy(false)
+      setActivity(IDLE_ACTIVITY)
+      setContextUsage(null)
+      const snapshot = sessionId
+        ? {
+            id: sessionId,
+            messages: messagesRef.current,
+            history: historyRef.current,
+            title: sessionTitleRef.current
+          }
+        : null
+      if (options?.persist !== false) {
+        await flushActiveSession()
+      }
+      return snapshot
+    },
+    [bumpChatEpoch, flushActiveSession]
+  )
 
   const handleNewSession = async (): Promise<void> => {
     setView('chat')
-    await leaveCurrentSession()
+    const previous = await leaveCurrentSession({ persist: false })
     const state = await window.api.sessions.create()
     applySessionsState(state)
+    if (previous) {
+      void writeSession(
+        previous.id,
+        previous.messages,
+        previous.history,
+        previous.title
+      )
+    }
   }
 
   const handleSelectSession = async (id: string): Promise<void> => {
     setView('chat')
     if (id === activeSessionIdRef.current) return
-    await leaveCurrentSession()
+    const previous = await leaveCurrentSession({ persist: false })
     const state = await window.api.sessions.setActive(id)
     const bg = backgroundSessionsRef.current.get(id)
     if (bg) {
@@ -1204,6 +1239,14 @@ export default function App(): React.JSX.Element {
     if (running?.sessionId === id) {
       adoptRunningTurn(id, running.turnId)
     }
+    if (previous) {
+      void writeSession(
+        previous.id,
+        previous.messages,
+        previous.history,
+        previous.title
+      )
+    }
   }
 
   const handleDeleteSession = async (id: string): Promise<void> => {
@@ -1213,7 +1256,7 @@ export default function App(): React.JSX.Element {
       cancelAiTitle()
     }
     if (id === activeSessionIdRef.current) {
-      await leaveCurrentSession()
+      await leaveCurrentSession({ persist: false })
     }
     const state = await window.api.sessions.delete(id)
     applySessionsState(state)
