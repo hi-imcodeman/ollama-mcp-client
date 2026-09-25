@@ -15,11 +15,16 @@ function normalizeBase64(value: unknown): string | undefined {
 }
 
 function decodeRawBase64Image(value: string): Buffer {
-  if (
-    value.length === 0 ||
-    value.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
-  ) {
+  const padding = value.match(/=*$/)?.[0].length ?? 0
+  const unpaddedLength = value.length - padding
+  const validAlphabet = /^[A-Za-z0-9+/]*={0,2}$/.test(value)
+  const validLength = unpaddedLength % 4 !== 1
+  const validPadding =
+    padding === 0 ||
+    (value.length % 4 === 0 &&
+      ((padding === 2 && unpaddedLength % 4 === 2) ||
+        (padding === 1 && unpaddedLength % 4 === 3)))
+  if (value.length === 0 || !validAlphabet || !validLength || !validPadding) {
     throw new Error('Source images must contain valid base64 payloads')
   }
   const bytes = Buffer.from(value, 'base64')

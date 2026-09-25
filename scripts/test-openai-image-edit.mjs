@@ -91,6 +91,25 @@ test('sends multiple source images as ordered multipart image parts', async () =
   }
 })
 
+test('accepts valid unpadded base64 payloads', async () => {
+  setOpenaiApiKey('test-key')
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (...args) => {
+    request = args[1]
+    return mockResponse({ data: [{ b64_json: 'edited-image' }] })
+  }
+
+  try {
+    const result = await editOpenAiImageBase64('gpt-image-1', 'edit', ['c2Vjb25k'])
+    assert.equal(result.b64, 'edited-image')
+    const image = request.body.get('image')
+    assert.equal(Buffer.from(await image.arrayBuffer()).toString(), 'second')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('formats edit API errors and forwards abort signals', async () => {
   setOpenaiApiKey('test-key')
   const originalFetch = globalThis.fetch

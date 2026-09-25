@@ -44,3 +44,33 @@ and the harnesses exit successfully.
 
 - No API-key exposure or key-validation behavior was changed.
 - The OpenAI API was not contacted; all image API calls were mocked.
+
+## Re-review fixes
+
+The re-review identified that availability had been narrowed to the active LLM
+provider, which broke the supported cross-provider flow. Availability now
+checks the combined image-backend list, while execution still resolves the
+configured model and routes to its actual backend. The provider-safe stale
+model fallback remains in place.
+
+Added regression coverage for:
+
+- OpenAI LLM with an Ollama image backend offering `generate_image`.
+- OpenAI LLM execution routing through the configured Ollama image model.
+- Valid unpadded base64 payloads being accepted.
+
+Re-review verification:
+
+- `node scripts/test-image-gen-tool.mjs` — passed (10/10)
+- `node scripts/test-openai-image-edit.mjs` — passed (5/5)
+- `node scripts/test-agent-image-attachments.mjs` — passed (2/2)
+- `node scripts/smoke-offline-image-gate.mjs` — passed
+- `node scripts/check-openai-vision.mjs` — passed
+- `npm run typecheck` — passed
+- `npm run build` — passed
+- `git diff --check` — passed
+- IDE lints for changed files — no errors
+
+The focused Vite harnesses again emitted incidental dependency-scan shutdown
+output because the development server is active; all harness assertions passed
+and the commands exited successfully.

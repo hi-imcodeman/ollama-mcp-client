@@ -139,8 +139,9 @@ test('does not fall back to the other provider when the configured model is stal
   }
 })
 
-test('keeps image tool availability scoped to the active provider', async () => {
+test('offers the tool to OpenAI when Ollama is the configured image backend', async () => {
   setOpenaiModelsCatalog([])
+  setDefaultImageModel('flux')
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (...args) => {
     if (String(args[0]).endsWith('/api/tags')) {
@@ -152,8 +153,39 @@ test('keeps image tool availability scoped to the active provider', async () => 
   }
 
   try {
-    assert.equal(await shouldOfferGenerateImageTool('openai', 'llama3.2'), false)
+    assert.equal(await shouldOfferGenerateImageTool('openai', 'gpt-4.1-mini'), true)
     assert.equal(await shouldOfferGenerateImageTool('ollama', 'llama3.2'), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('routes an OpenAI turn through the configured Ollama image backend', async () => {
+  setOpenaiModelsCatalog([])
+  setDefaultImageModel('flux')
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (...args) => {
+    calls.push(args)
+    const url = String(args[0])
+    if (url.endsWith('/api/tags')) {
+      return response({
+        models: [{ name: 'flux', details: { families: ['diffusion'] } }]
+      })
+    }
+    if (url.endsWith('/api/version')) return response({ version: '0.1.0' })
+    if (url.endsWith('/api/generate')) {
+      return response({ image: Buffer.alloc(1024, 7).toString('base64') })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  try {
+    const result = await runGenerateImageTool('openai', { prompt: 'a test image' })
+    assert.equal(result.ok, true)
+    assert.equal(result.model, 'flux')
+    assert.equal(result.message, 'Generated image with flux via ollama')
+    assert.ok(calls.some((call) => String(call[0]).endsWith('/api/generate')))
   } finally {
     globalThis.fetch = originalFetch
   }

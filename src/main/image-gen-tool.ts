@@ -133,6 +133,9 @@ export async function shouldOfferGenerateImageTool(
   const provider: LlmProvider =
     selectedModelArg === undefined ? 'ollama' : providerOrSelectedModel as LlmProvider
   const selectedModel = selectedModelArg ?? providerOrSelectedModel
+  if (isOpenAiImageGenModel(selectedModel)) {
+    return false
+  }
   if (provider === 'ollama') {
     const status = await getOllamaStatus()
     if (!status.ok || status.imageGenSupported === false) return false
@@ -142,28 +145,11 @@ export async function shouldOfferGenerateImageTool(
       if (modelIsImageGen(selectedModel, { capabilities: selected?.capabilities })) {
         return false
       }
-      return models.some((m) =>
-        modelIsImageGen(m.name, { capabilities: m.capabilities })
-      )
     } catch {
       return false
     }
   }
-
-  const catalog = getOpenaiModelsCatalog()
-  const enabled = getOpenaiModelEnabledMap()
-  const hasEnabledOpenAiImageModel = catalog.some(
-    (entry) => enabled[entry.id] === true && isOpenAiImageGenModel(entry.id)
-  )
-  if (hasEnabledOpenAiImageModel) {
-    return !isOpenAiImageGenModel(selectedModel)
-  }
-
-  const available = await listAvailableImageModelNames(provider)
-  if (isOpenAiImageGenModel(selectedModel)) {
-    return false
-  }
-  return available.length > 0
+  return (await listAvailableImageModels()).length > 0
 }
 
 export function generateImageToolDefinition(): OllamaTool {
