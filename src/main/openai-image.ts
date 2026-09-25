@@ -79,6 +79,56 @@ async function openAiImagesGenerate(
   return { b64, usage: parseOpenAiUsageFromJson(data.usage) }
 }
 
+/**
+ * Edit one or more source images via the OpenAI Images Edits API.
+ */
+export async function editOpenAiImageBase64(
+  model: string,
+  prompt: string,
+  images: string[],
+  signal?: AbortSignal
+): Promise<OpenAiImageGenerateResult> {
+  const apiKey = getOpenaiApiKey()
+  if (!apiKey) throw new Error('OpenAI API key not configured')
+  if (!Array.isArray(images) || images.length === 0) {
+    throw new Error('At least one source image is required for image editing')
+  }
+
+  const form = new FormData()
+  form.append('model', model)
+  form.append('prompt', prompt)
+  form.append('n', '1')
+  for (const image of images) {
+    if (typeof image !== 'string' || !image) {
+      throw new Error('Source images must be non-empty base64 payloads')
+    }
+    const bytes = Buffer.from(image, 'base64')
+    if (bytes.length === 0) {
+      throw new Error('Source images must be non-empty base64 payloads')
+    }
+    form.append('image', new Blob([bytes], { type: 'image/png' }), 'image.png')
+  }
+
+  const res = await fetch(`${OPENAI_BASE}/images/edits`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+    signal
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(formatOpenAiError(text, res.status))
+  }
+  const data = (await res.json()) as {
+    data?: Array<{ b64_json?: unknown; url?: unknown }>
+    usage?: unknown
+  }
+  const first = data.data?.[0]
+  const b64 = normalizeBase64(first?.b64_json) ?? normalizeBase64(first?.url)
+  if (!b64) throw new Error('Image API returned no image data')
+  return { b64, usage: parseOpenAiUsageFromJson(data.usage) }
+}
+
 async function openAiResponsesImageGenerate(
   model: string,
   prompt: string,
