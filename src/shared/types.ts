@@ -341,6 +341,8 @@ export type UiMessage =
       content: string
       createdAt: string
       attachmentLabels?: string[]
+      /** Original image data URLs shown in the prompt bubble. */
+      images?: string[]
       /** Model selected for this turn. */
       model?: string
       /** Waiting for global agent queue. */
