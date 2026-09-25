@@ -61,7 +61,7 @@ test('routes deduplicated source images to OpenAI editing', async () => {
   try {
     const result = await runGenerateImageTool('openai', {
       prompt: 'remove the background',
-      images: ['base64-image', 'other-image', 'base64-image']
+      images: ['Zmlyc3Q=', 'c2Vjb25k=', 'Zmlyc3Q=']
     })
     assert.deepEqual(result, {
       ok: true,
@@ -70,9 +70,33 @@ test('routes deduplicated source images to OpenAI editing', async () => {
       message: 'Generated image with gpt-image-1 via openai'
     })
     const request = calls.at(-1)[1]
-    assert.deepEqual(request.body.getAll('image').length, 2)
+    assert.equal(request.body.get('model'), 'gpt-image-1')
+    assert.equal(request.body.get('prompt'), 'remove the background')
+    const images = request.body.getAll('image')
+    assert.equal(images.length, 2)
+    assert.deepEqual(
+      await Promise.all(
+        images.map((image) =>
+          image.arrayBuffer().then((bytes) => Buffer.from(bytes).toString())
+        )
+      ),
+      ['first', 'second']
+    )
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('rejects invalid image arguments with a clear failure', async () => {
+  for (const images of [null, 'not-an-array', ['']]) {
+    const result = await runGenerateImageTool('openai', {
+      prompt: 'edit this',
+      images
+    })
+    assert.deepEqual(result, {
+      ok: false,
+      message: 'Source images must be non-empty strings'
+    })
   }
 })
 
@@ -98,6 +122,81 @@ test('rejects image editing on Ollama without text generation', async () => {
       ok: false,
       message:
         'Image editing requires an OpenAI image model. Select an OpenAI image model and try again.'
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('preserves text-only OpenAI result metadata and routing', async () => {
+  setOpenaiApiKey('test-key')
+  setOpenaiModelsCatalog([{ id: 'dall-e-3', name: 'dall-e-3' }])
+  setOpenaiModelEnabled('dall-e-3', true)
+  setDefaultImageModel('dall-e-3')
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (...args) => {
+    calls.push(args)
+    return response({ data: [{ b64_json: 'generated-openai-image' }] })
+  }
+
+  try {
+    const result = await runGenerateImageTool('openai', {
+      prompt: 'a red kite'
+    })
+    assert.deepEqual(result, {
+      ok: true,
+      model: 'dall-e-3',
+      imageBase64: 'generated-openai-image',
+      message: 'Generated image with dall-e-3 via openai'
+    })
+    const generationCall = calls.find((call) =>
+      String(call[0]).endsWith('/images/generations')
+    )
+    assert.ok(generationCall)
+    assert.equal(
+      calls.some((call) => String(call[0]).endsWith('/images/edits')),
+      false
+    )
+    const request = JSON.parse(generationCall[1].body)
+    assert.deepEqual(request, {
+      model: 'dall-e-3',
+      prompt: 'a red kite',
+      n: 1,
+      response_format: 'b64_json'
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('preserves text-only Ollama result metadata and routing', async () => {
+  setOpenaiModelsCatalog([])
+  setDefaultImageModel('flux')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (...args) => {
+    const url = String(args[0])
+    if (url.endsWith('/api/tags')) {
+      return response({
+        models: [{ name: 'flux', details: { families: ['diffusion'] } }]
+      })
+    }
+    if (url.endsWith('/api/version')) return response({ version: '0.1.0' })
+    if (url.endsWith('/api/generate')) {
+      return response({ image: Buffer.alloc(1024, 7).toString('base64') })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  try {
+    const result = await runGenerateImageTool('ollama', {
+      prompt: 'a blue kite'
+    })
+    assert.deepEqual(result, {
+      ok: true,
+      model: 'flux',
+      imageBase64: Buffer.alloc(1024, 7).toString('base64'),
+      message: 'Generated image with flux via ollama'
     })
   } finally {
     globalThis.fetch = originalFetch
