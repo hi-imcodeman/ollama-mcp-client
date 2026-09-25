@@ -36,7 +36,13 @@ for (const model of ['gpt-4o', 'gpt-4.1-mini', 'o3', 'o4-mini', 'gpt-6']) {
   assert.equal(isOpenAiImageGenModel(model), false, `${model} should not be image-only`)
 }
 
-for (const model of ['gpt-3.5-turbo', 'totally-unknown-model']) {
+for (const model of [
+  'gpt-3.5-turbo',
+  'gpt-4ocean',
+  'o1x',
+  'gpt-5.6x',
+  'totally-unknown-model',
+]) {
   assert.equal(isOpenAiVisionModel(model), false, `${model} should not be known vision`)
   assert.equal(isOpenAiImageGenModel(model), false, `${model} should not be image-only`)
 }
