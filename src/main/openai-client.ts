@@ -1,6 +1,6 @@
 import type { OpenAiModelEntry } from '../shared/types'
 import { isOpenAiImageGenModel } from '../shared/openai-models'
-import type { OllamaChatMessage, OllamaTool } from './ollama'
+import type { OllamaChatChunk, OllamaChatMessage, OllamaTool } from './ollama'
 import { getOpenaiApiKey } from './config-store'
 
 export const OPENAI_BASE = 'https://api.openai.com/v1'
@@ -249,6 +249,7 @@ export async function openAiChatStream(options: {
   tools?: OllamaTool[]
   apiKey?: string
   signal?: AbortSignal
+  onChunk?: (chunk: OllamaChatChunk) => void
 }): Promise<OpenAiStreamResult> {
   const apiKey = options.apiKey ?? getOpenaiApiKey()
   if (!apiKey) throw new Error('OpenAI API key not configured')
@@ -311,6 +312,8 @@ export async function openAiChatStream(options: {
         choices?: Array<{
           delta?: {
             content?: string
+            reasoning?: string
+            reasoning_content?: string
             tool_calls?: Array<{
               index?: number
               id?: string
@@ -321,7 +324,27 @@ export async function openAiChatStream(options: {
         usage?: unknown
       }
       const delta = chunk.choices?.[0]?.delta
-      if (delta?.content) content += delta.content
+      const thinking = delta?.reasoning_content ?? delta?.reasoning
+      if (delta?.content) {
+        content += delta.content
+        options.onChunk?.({ message: { content: delta.content } })
+      }
+      if (thinking) {
+        options.onChunk?.({ message: { thinking } })
+      }
+      if (delta?.tool_calls) {
+        options.onChunk?.({
+          message: {
+            tool_calls: delta.tool_calls.map((tc) => ({
+              id: tc.id,
+              function: {
+                name: tc.function?.name ?? '',
+                arguments: tc.function?.arguments ?? ''
+              }
+            }))
+          }
+        })
+      }
       if (delta?.tool_calls) {
         for (const tc of delta.tool_calls) {
           const idx = tc.index ?? 0

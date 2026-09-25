@@ -33,20 +33,16 @@ export const openaiLlmProvider: LlmProvider = {
   id: 'openai',
 
   async chatStream(options) {
-    let content = ''
     const result = await openAiChatStream({
       model: options.model,
       messages: options.messages,
       tools: options.tools,
-      signal: options.signal
+      signal: options.signal,
+      onChunk: options.onChunk
     })
-    content = result.content
-    if (content) {
-      options.onChunk({ message: { content } })
-    }
     options.onChunk({ done: true })
     return {
-      content,
+      content: result.content,
       toolCalls: result.toolCalls,
       promptEvalCount: result.promptEvalCount,
       evalCount: result.evalCount,
