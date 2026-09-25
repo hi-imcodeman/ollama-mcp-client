@@ -1,5 +1,8 @@
 import type { OllamaModel } from '../../shared/types'
-import { isOpenAiImageGenModel } from '../../shared/openai-models'
+import {
+  isOpenAiImageGenModel,
+  isOpenAiVisionModel
+} from '../../shared/openai-models'
 import {
   getOpenaiModelEnabledMap,
   getOpenaiModelsCatalog
@@ -22,9 +25,9 @@ const DEFAULT_CTX = 128_000
 
 function openAiModelTags(id: string): string[] {
   const tags: string[] = ['openai']
-  const lower = id.toLowerCase()
   if (isOpenAiImageGenModel(id)) tags.push('image')
-  if (lower.includes('gpt-4o') || lower.includes('vision')) tags.push('vision')
+  if (isOpenAiVisionModel(id)) tags.push('vision')
+  const lower = id.toLowerCase()
   if (lower.startsWith('o1') || lower.startsWith('o3') || lower.includes('reasoning')) {
     tags.push('thinking')
   }
@@ -100,9 +103,7 @@ export const openaiLlmProvider: LlmProvider = {
   detectVisionSupport(model, info) {
     const support = ollamaDetectVision(model, info ? { capabilities: info.capabilities } : null)
     if (support !== 'unknown') return support
-    const lower = model.toLowerCase()
-    if (lower.includes('gpt-4o') || lower.includes('vision')) return 'yes'
-    return 'unknown'
+    return isOpenAiVisionModel(model) ? 'yes' : 'unknown'
   },
 
   async resolveContextLength(_model, info) {

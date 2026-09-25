@@ -10,8 +10,7 @@ export function isChatModelId(id: string): boolean {
   if (lower.startsWith('text-embedding-')) return false
   if (lower.startsWith('whisper-')) return false
   if (lower.startsWith('tts-')) return false
-  if (lower.startsWith('dall-e-')) return false
-  if (lower.startsWith('gpt-image-')) return false
+  if (isOpenAiImageGenModel(id)) return false
   if (lower.includes('realtime')) return false
   return true
 }
