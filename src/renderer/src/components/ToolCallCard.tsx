@@ -26,6 +26,22 @@ const STATUS_COLOR = {
   error: 'text-rose-300'
 } as const
 
+export function summarizeToolArguments(
+  args: Record<string, unknown>
+): string[] {
+  return Object.entries(args).map(([key, value]) => {
+    if (key === 'images' && Array.isArray(value)) {
+      return `${key}: ${value.length} attached image(s)`
+    }
+    if (typeof value === 'string') {
+      const preview = value.length > 120 ? `${value.slice(0, 120)}…` : value
+      return `${key}: ${JSON.stringify(preview)}`
+    }
+    const serialized = JSON.stringify(value)
+    return `${key}: ${serialized === undefined ? String(value) : serialized}`
+  })
+}
+
 export function ToolCallCard({
   name,
   arguments: args,
@@ -39,6 +55,7 @@ export function ToolCallCard({
 }: ToolCallCardProps): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const argsJson = JSON.stringify(args, null, 2)
+  const argumentSummary = summarizeToolArguments(args)
   const truncated =
     result && result.length > 4000 ? `${result.slice(0, 4000)}\n…` : result
   const shortName = name.includes('__') ? name.split('__').slice(1).join('__') : name
@@ -77,7 +94,7 @@ export function ToolCallCard({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium tracking-wide text-[#f0f4f8]">
-                    Tool call
+                    {shortName}
                   </span>
                   <span className="activity-dots" aria-hidden="true">
                     <span>.</span>
@@ -89,15 +106,21 @@ export function ToolCallCard({
                       {segmentLabel}
                     </span>
                   ) : null}
-                  <span
-                    className={`truncate font-mono text-[11px] text-[#6b7a8c] ${segmentLabel ? '' : 'ml-auto'}`}
-                  >
-                    {shortName}
-                  </span>
                 </div>
-                <p className="mt-0.5 truncate text-xs text-[#8b9aab]">
-                  {STATUS_LABEL[status]}…
-                </p>
+                <p className="mt-0.5 truncate text-xs text-[#8b9aab]">{STATUS_LABEL[status]}…</p>
+                {argumentSummary.length > 0 && (
+                  <div className="mt-1 space-y-0.5">
+                    {argumentSummary.map((line, index) => (
+                      <div
+                        key={`${line}-${index}`}
+                        className="truncate font-mono text-[10px] text-[#9fb0bf]"
+                        title={line}
+                      >
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <div className="activity-progress mt-3 h-1 overflow-hidden rounded-full bg-[#1a2430]">
