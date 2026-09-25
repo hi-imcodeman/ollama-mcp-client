@@ -176,11 +176,7 @@ export function buildMessageFromAttachments(
     }
   }
 
-  const content =
-    parts.join('\n\n') ||
-    (images.length
-      ? 'Describe what you see in the attached image(s) in detail.'
-      : '')
+  const content = parts.join('\n\n')
 
   return {
     content,
