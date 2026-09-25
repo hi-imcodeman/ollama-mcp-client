@@ -8,7 +8,11 @@ const server = await createServer({
   appType: 'custom'
 })
 
-const { prepareEditImageToolArguments, prepareGenerateImageToolArguments } =
+const {
+  prepareEditImageToolArguments,
+  prepareGenerateImageToolArguments,
+  selectEditImageSources
+} =
   await server.ssrLoadModule(
   new URL('../src/main/agent-image-boundary.ts', import.meta.url).pathname
 )
@@ -70,4 +74,55 @@ test('passes current attachments as internal edit sources', () => {
   ])
 
   assert.deepEqual(result, ['current-image'])
+})
+
+test('current uploads override the latest generated image', () => {
+  assert.deepEqual(
+    selectEditImageSources(
+      [{ role: 'user', content: 'edit', images: ['a', 'b', 'a'] }],
+      'generated'
+    ),
+    ['a', 'b']
+  )
+})
+
+test('uses the latest generated image when the current turn has no uploads', () => {
+  assert.deepEqual(
+    selectEditImageSources([{ role: 'user', content: 'edit' }], 'generated'),
+    ['generated']
+  )
+})
+
+test('returns no sources when neither uploads nor generated image exists', () => {
+  assert.deepEqual(
+    selectEditImageSources([{ role: 'user', content: 'edit' }]),
+    []
+  )
+})
+
+test('excludes uploads from earlier turns', () => {
+  assert.deepEqual(
+    selectEditImageSources(
+      [
+        { role: 'user', content: 'earlier', images: ['old'] },
+        { role: 'assistant', content: 'response' },
+        { role: 'user', content: 'follow-up' }
+      ],
+      'generated'
+    ),
+    ['generated']
+  )
+})
+
+test('a repeated edit can use its previous output as the latest source', () => {
+  const firstEdit = selectEditImageSources(
+    [{ role: 'user', content: 'first edit' }],
+    'generated'
+  )
+  const secondEdit = selectEditImageSources(
+    [{ role: 'user', content: 'second edit' }],
+    'edited-output'
+  )
+  assert.deepEqual(firstEdit, ['generated'])
+  assert.deepEqual(secondEdit, ['edited-output'])
 })

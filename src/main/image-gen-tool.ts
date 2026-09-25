@@ -247,7 +247,10 @@ export async function runEditImageTool(
   }
   const selectedImages = [...new Set(images)]
   if (selectedImages.length === 0) {
-    return { ok: false, message: 'At least one source image is required for image editing' }
+    return {
+      ok: false,
+      message: 'Upload or generate an image first before editing.'
+    }
   }
 
   try {

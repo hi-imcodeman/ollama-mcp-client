@@ -82,6 +82,15 @@ function mergeLlmStreamUsage(
 
 let activeAbort: AbortController | null = null
 let activeTurnId: string | null = null
+const latestGeneratedImageBySession = new Map<string, string>()
+
+function latestGeneratedImage(sessionId: string): string | undefined {
+  return latestGeneratedImageBySession.get(sessionId)
+}
+
+function rememberGeneratedImage(sessionId: string, imageBase64: string): void {
+  latestGeneratedImageBySession.set(sessionId, imageBase64)
+}
 
 function emit(event: ChatEvent): void {
   emitChatEvent(event)
@@ -364,6 +373,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
         contextUsed: tokenUsage?.totalTokens,
         contextLimit: contextLimit ?? undefined
       })
+      rememberGeneratedImage(payload.sessionId, imageResult.b64)
       finish()
       return
     } catch (err) {
@@ -776,6 +786,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
                 imageModel: gen.model,
                 mime: 'image/png'
               })
+              rememberGeneratedImage(payload.sessionId, gen.imageBase64)
               ok = true
               result = gen.message
               console.log(
@@ -804,7 +815,10 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           const edit = await runEditImageTool(
             effective,
             String(tc.arguments.prompt ?? ''),
-            prepareEditImageToolArguments(payload.messages),
+            prepareEditImageToolArguments(
+              payload.messages,
+              latestGeneratedImage(payload.sessionId)
+            ),
             abort.signal
           )
           if (edit.ok) {
@@ -818,6 +832,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
                 imageModel: edit.model,
                 mime: 'image/png'
               })
+              rememberGeneratedImage(payload.sessionId, edit.imageBase64)
               ok = true
               result = edit.message
               console.log(

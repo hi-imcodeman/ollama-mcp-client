@@ -19,11 +19,24 @@ export function prepareGenerateImageToolArguments(
   }
 }
 
-export function prepareEditImageToolArguments(messages: ChatMessage[]): string[] {
+export function prepareEditImageToolArguments(
+  messages: ChatMessage[],
+  latestGeneratedImage?: string
+): string[] {
+  return selectEditImageSources(messages, latestGeneratedImage)
+}
+
+export function selectEditImageSources(
+  messages: ChatMessage[],
+  latestGeneratedImage?: string
+): string[] {
   const currentUserMessage = [...messages]
     .reverse()
     .find((message) => message.role === 'user')
-  return Array.isArray(currentUserMessage?.images)
+  const currentTurnImages = Array.isArray(currentUserMessage?.images)
     ? [...new Set(currentUserMessage.images)]
     : []
+
+  if (currentTurnImages.length > 0) return currentTurnImages
+  return latestGeneratedImage ? [latestGeneratedImage] : []
 }
