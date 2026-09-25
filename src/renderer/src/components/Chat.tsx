@@ -615,6 +615,18 @@ export function Chat({
               <div key={m.id} className="msg-enter flex justify-end">
                 <div className="max-w-[80%]">
                   <div className="rounded-2xl rounded-br-md bg-[#1e3a5f] px-3.5 py-2 text-sm leading-relaxed text-[#e7ecf1]">
+                    {m.images && m.images.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {m.images.map((src, index) => (
+                          <img
+                            key={`${m.id}-image-${index}`}
+                            src={src}
+                            alt="Attached image"
+                            className="max-h-40 max-w-40 rounded-lg object-contain"
+                          />
+                        ))}
+                      </div>
+                    )}
                     {m.attachmentLabels && m.attachmentLabels.length > 0 && (
                       <div className="mb-2 flex flex-wrap gap-1">
                         {m.attachmentLabels.map((label) => (

@@ -1058,6 +1058,9 @@ export default function App(): React.JSX.Element {
             ? payload.content
             : `Sent ${payload.attachmentLabels.length} file(s)`
           : payload.content
+    const displayImages = payload.images?.map((image) =>
+      image.startsWith('data:') ? image : `data:image/png;base64,${image}`
+    )
 
     const nextMessages: UiMessage[] = [
       ...messagesRef.current,
@@ -1067,6 +1070,7 @@ export default function App(): React.JSX.Element {
         content: uiContent,
         createdAt: nowIso(),
         attachmentLabels: payload.attachmentLabels,
+        images: displayImages,
         model: selectedModel,
         ...(willQueue ? { queueStatus: 'queued' as const } : {})
       }
