@@ -13,12 +13,7 @@ import {
   openAiChatOnce,
   openAiChatStream
 } from '../openai-client'
-import {
-  detectVisionSupport as ollamaDetectVision,
-  type OllamaChatChunk,
-  type OllamaChatMessage,
-  type OllamaTool
-} from '../ollama'
+import type { OllamaChatChunk, OllamaChatMessage, OllamaTool } from '../ollama'
 import type { LlmModelInfo, LlmProvider } from './types'
 
 const DEFAULT_CTX = 128_000
@@ -100,9 +95,7 @@ export const openaiLlmProvider: LlmProvider = {
     return isOpenAiImageGenModel(model)
   },
 
-  detectVisionSupport(model, info) {
-    const support = ollamaDetectVision(model, info ? { capabilities: info.capabilities } : null)
-    if (support !== 'unknown') return support
+  detectVisionSupport(model, _info) {
     return isOpenAiVisionModel(model) ? 'yes' : 'unknown'
   },
 
