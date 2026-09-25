@@ -1,47 +1,49 @@
-# Image-to-Image Editing Design
+# Image Generation and Image Editing Design
 
 ## Goal
 
-Support image editing requests in the existing built-in `generate_image` flow,
-including multiple uploaded source images, while preserving text-to-image
-generation and rejecting unsupported Ollama image-edit requests clearly.
+Support LLM-selected text-to-image generation and image-to-image editing,
+including follow-up edits that reuse the latest available image and multiple
+uploaded source images.
 
 ## Scope
 
-- One built-in `generate_image` tool remains the only image tool.
-- The LLM decides whether the request is text-to-image or image-to-image.
-- Uploaded image attachments are passed to the tool execution when present.
+- Use two built-in tools: `generate_image` for text-to-image and `edit_image`
+  for image-to-image operations.
+- The LLM decides which tool to invoke; no regex or intent heuristics are used.
+- `edit_image` receives source images automatically from the agent.
 - OpenAI image models use the Images Edits API for image-to-image requests.
 - Ollama image models remain text-to-image only.
 - Multiple source images are supported for OpenAI edits.
+- Source priority is all current-prompt uploaded images, otherwise the latest
+  generated image in the active session.
+- If no edit source exists, `edit_image` returns a clear error.
 - Existing generated-image rendering and model captions remain unchanged.
 
 ## Design
 
-### Tool contract
+### Tool contracts
 
-Extend `generate_image` with an optional `images` array. Each item is the raw
-base64 image payload already present in the current turn. The tool description
-will state that `images` must be included when editing or combining uploaded
-images, and omitted for ordinary text-to-image generation.
+`generate_image` accepts only a required text `prompt` and is used for
+text-to-image requests.
 
-The agent will make the current turn's attached images available to the tool
-execution without requiring the model to reproduce large base64 values in its
-tool-call arguments. The execution layer combines the model-provided optional
-images with the current turn attachments, deduplicating by exact payload.
+`edit_image` accepts only a required text `prompt`. It does not expose an
+image/base64 argument to the LLM. The agent supplies source images
+automatically, so the LLM never needs to reproduce large image payloads.
 
 ### Backend routing
 
-`runGenerateImageTool` continues to resolve the configured image backend.
+`runGenerateImageTool` is split into generation and editing execution paths,
+while preserving configured image-model routing.
 
-- No source images: use the existing OpenAI generation or Ollama generation
-  path.
-- Source images with an OpenAI backend: call `POST /v1/images/edits` using
+- `generate_image`: use the existing OpenAI generation or Ollama generation
+  path, with no source images.
+- `edit_image` with an OpenAI backend: call `POST /v1/images/edits` using
   multipart form data, with one `image` part per source image, the prompt, and
   `n=1`. Return the first `b64_json` result.
-- Source images with an Ollama backend: return a tool failure explaining that
-  image editing requires an OpenAI image model. Do not silently convert the
-  request to text-to-image.
+- `edit_image` with an Ollama backend: return a tool failure explaining that
+  image editing requires an OpenAI image model. Never silently convert editing
+  into text-to-image generation.
 
 The OpenAI edit helper will use the selected OpenAI image model and preserve
 the existing API-key, abort-signal, and error-formatting conventions.
@@ -52,17 +54,22 @@ the existing API-key, abort-signal, and error-formatting conventions.
    pipeline, preserving the original preview separately from the API payload.
 2. Renderer sends image payloads in the existing `ChatSendPayload.messages`
    structure.
-3. Agent validates image capability for the chat model as it does today.
-4. When the LLM emits `generate_image`, the agent passes the current turn's
-   image payloads into image-tool execution.
-5. The image tool routes to OpenAI edits or rejects unsupported Ollama edits.
-6. The existing `assistant_images` event renders the edited result and model
+3. The agent maintains the latest generated image for the active session
+   internally for follow-up turns.
+4. The LLM receives both built-in tool definitions and chooses
+   `generate_image` or `edit_image`.
+5. When `edit_image` is emitted, the agent selects all current-prompt images,
+   or falls back to the latest generated image.
+6. The image tool routes to OpenAI edits or rejects unsupported Ollama edits.
+7. The existing `assistant_images` event renders the result and model
    name.
 
 ### Validation and errors
 
 - Empty or malformed image payloads produce a clear tool error.
 - An empty prompt remains invalid.
+- `edit_image` without a current upload or prior generated image produces a
+  clear “upload or generate an image first” error.
 - Multiple images are sent as separate multipart `image` fields.
 - OpenAI API errors use the existing formatted error helper.
 - Aborts propagate through the existing `AbortSignal`.
@@ -72,12 +79,16 @@ the existing API-key, abort-signal, and error-formatting conventions.
 
 Add focused tests for:
 
-1. OpenAI text-only generation uses the existing generation endpoint.
-2. OpenAI one-image editing sends multipart image data to `/images/edits`.
-3. OpenAI multi-image editing sends every source image.
-4. Ollama image editing returns a clear unsupported-operation failure.
-5. The tool schema exposes optional images while keeping prompt required.
-6. Tool execution retains existing model metadata and output behavior.
+1. `generate_image` exposes only a required prompt and uses the generation
+   endpoint.
+2. `edit_image` exposes only a required prompt.
+3. One uploaded image is selected for an edit when present.
+4. Multiple current-prompt images are all selected for composition.
+5. The latest generated image is selected when no image is uploaded.
+6. An edit without any source image returns a clear error.
+7. OpenAI edits send multipart image data to `/images/edits`.
+8. Ollama image editing returns a clear unsupported-operation failure.
+9. Tool execution retains existing model metadata and output behavior.
 
 Run `npm run typecheck`, `npm run build`, and `git diff --check` after
 implementation. No production API keys or external image requests are needed
