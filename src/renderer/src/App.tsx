@@ -912,7 +912,10 @@ export default function App(): React.JSX.Element {
                   {
                     ...m,
                     status: event.ok ? ('done' as const) : ('error' as const),
-                    result: event.result
+                    result: event.result,
+                    images: event.images,
+                    imageModel: event.imageModel,
+                    mime: event.mime
                   },
                   turnStartedAtRef.current
                 )

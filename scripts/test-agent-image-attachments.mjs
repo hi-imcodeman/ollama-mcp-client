@@ -34,7 +34,7 @@ const {
 const { buildAgentImageTools } = await server.ssrLoadModule(
   new URL('../src/main/agent-tool-boundary.ts', import.meta.url).pathname
 )
-const { runAgentTurn } = await server.ssrLoadModule(
+const { abortChat, clearLatestGeneratedImage, runAgentTurn } = await server.ssrLoadModule(
   new URL('../src/main/agent.ts', import.meta.url).pathname
 )
 const { onChatEvent } = await server.ssrLoadModule(
@@ -218,6 +218,8 @@ test('dispatches generation without sources and editing with selected sources', 
   const originalFetch = globalThis.fetch
   const requests = []
   let nextTool = 'generate_image'
+  let deferGeneration = false
+  let releaseGeneration = null
   globalThis.fetch = async (...args) => {
     const url = String(args[0])
     requests.push(args)
@@ -228,6 +230,11 @@ test('dispatches generation without sources and editing with selected sources', 
     }
     if (url.endsWith('/api/chat')) return mockChatResponse(nextTool)
     if (url.endsWith('/images/generations')) {
+      if (deferGeneration) {
+        await new Promise((resolve) => {
+          releaseGeneration = resolve
+        })
+      }
       return mockResponse({ data: [{ b64_json: 'generated-image' }] })
     }
     if (url.endsWith('/images/edits')) {
@@ -259,6 +266,9 @@ test('dispatches generation without sources and editing with selected sources', 
     assert.ok(imageRequest)
     assert.equal(JSON.parse(imageRequest[1].body).images, undefined)
     assert.equal(events.filter((event) => event.type === 'assistant_images').length, 1)
+    assert.deepEqual(events.find((event) => event.type === 'tool_result').images, [
+      'generated-image'
+    ])
     assert.equal(events.at(-1).type, 'done')
 
     events.length = 0
@@ -283,7 +293,33 @@ test('dispatches generation without sources and editing with selected sources', 
     })
     assert.equal(events.find((event) => event.type === 'tool_start').name, 'edit_image')
     assert.equal(events.find((event) => event.type === 'tool_result').ok, true)
+    assert.deepEqual(events.find((event) => event.type === 'tool_result').images, ['edited-image'])
     assert.equal(events.at(-1).type, 'done')
+
+    events.length = 0
+    requests.length = 0
+    nextTool = 'generate_image'
+    deferGeneration = true
+    const inFlight = runAgentTurn({
+      ...basePayload,
+      turnId: 'task-4-deleted',
+      messages: [{ role: 'user', content: 'generate before deletion' }]
+    })
+    while (!releaseGeneration) await new Promise((resolve) => setImmediate(resolve))
+    abortChat()
+    clearLatestGeneratedImage(basePayload.sessionId)
+    releaseGeneration()
+    await inFlight
+
+    nextTool = 'edit_image'
+    deferGeneration = false
+    await runAgentTurn({
+      ...basePayload,
+      turnId: 'task-4-after-delete',
+      messages: [{ role: 'user', content: 'edit after deletion' }]
+    })
+    assert.equal(requests.some(([url]) => String(url).endsWith('/images/edits')), false)
+    assert.equal(events.find((event) => event.type === 'tool_result')?.ok, false)
   } finally {
     unsubscribe()
     globalThis.fetch = originalFetch

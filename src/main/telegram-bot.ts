@@ -30,6 +30,8 @@ import {
   type TelegramSendFns
 } from './telegram-mirror'
 import { runTelegramTurn } from './telegram-turn'
+import { removeSessionTurns } from './chat-queue'
+import { clearLatestGeneratedImage } from './agent'
 
 let bot: Telegraf | null = null
 let running = false
@@ -418,6 +420,8 @@ function registerHandlers(instance: Telegraf): void {
         return
       }
       try {
+        removeSessionTurns(sessionId)
+        clearLatestGeneratedImage(sessionId)
         deleteSession(sessionId)
         broadcastSessionsChanged()
         await ctx.answerCbQuery('Session deleted')

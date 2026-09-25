@@ -211,7 +211,10 @@ export function applyBackgroundChatEvent(
             {
               ...m,
               status: event.ok ? 'done' : 'error',
-              result: event.result
+              result: event.result,
+              images: event.images,
+              imageModel: event.imageModel,
+              mime: event.mime
             },
             turnStartedAt
           )

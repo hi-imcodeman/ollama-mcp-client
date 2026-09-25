@@ -5,29 +5,34 @@ Package: `ollama-mcp-client@0.1.0`
 
 ## Scope completed
 
-- Preserved OpenAI image usage through `GenerateImageToolResult` and
-  `assistant_images` events for both generation and editing.
+- Added optional image payload and metadata to `tool_result` events for both
+  built-in generation and editing tools, while preserving MCP results.
+- Persisted tool-result image fields through foreground and background renderer
+  event handling.
 - Carried renderer attachment MIME metadata (`image/jpeg`) alongside the
   existing raw base64 payloads, while retaining raw string compatibility.
 - Labeled OpenAI edit multipart parts with the source MIME and matching
   filename; retained multiple-image uploads.
-- Cleared the session's latest generated image when the IPC session-delete
-  path runs.
-- Added focused assertions for usage propagation, MIME labeling, data URLs,
-  multiple images, and renderer-to-agent MIME transport.
+- Cleared the latest generated image and removed/aborted pending turns in both
+  desktop and Telegram deletion paths.
+- Added focused assertions for tool-result image propagation and for an aborted
+  in-flight turn not repopulating a deleted session's image cache.
 
 ## Verification
 
-All passed:
+Passed:
 
-- `node --test scripts/test-openai-image-edit.mjs`
-- `node --test scripts/test-image-gen-tool.mjs`
-- `node --test scripts/test-agent-image-attachments.mjs`
+- `node scripts/test-image-gen-tool.mjs`
+- `node scripts/test-openai-image-edit.mjs`
+- `node scripts/test-agent-image-attachments.mjs` (11 tests)
+- `node scripts/test-tool-call-preview.mjs`
 - `npm run check:openai-vision`
 - `npm run typecheck`
 - `npm run build`
 - `git diff --check`
-- IDE lints for all edited production files: no diagnostics
+IDE lints report the pre-existing `src/renderer/src/App.tsx` diagnostic that
+`src/preload/index.ts` is outside `tsconfig.web.json`; no new diagnostics were
+reported for the other changed files.
 
 ## Current working-tree package state
 
@@ -40,3 +45,6 @@ uncommitted:
 
 The OpenAI API-key renderer/storage architecture remains an out-of-scope
 concern for this task.
+
+No live provider or Telegram API calls were made; image tests use mocked
+responses.

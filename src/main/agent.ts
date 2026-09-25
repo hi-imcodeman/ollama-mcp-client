@@ -811,7 +811,11 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
                 id,
                 name: tc.name,
                 ok,
-                result
+                result,
+                images: [gen.imageBase64],
+                imageModel: gen.model,
+                mime: 'image/png',
+                tokenUsage
               })
               finish()
               return
@@ -862,7 +866,11 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
                 id,
                 name: tc.name,
                 ok,
-                result
+                result,
+                images: [edit.imageBase64],
+                imageModel: edit.model,
+                mime: 'image/png',
+                tokenUsage
               })
               finish()
               return

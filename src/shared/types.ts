@@ -296,6 +296,11 @@ export type ChatEvent =
       name: string
       ok: boolean
       result: string
+      /** Optional generated image payload for image tools; absent for MCP results. */
+      images?: string[]
+      imageModel?: string
+      mime?: string
+      tokenUsage?: TokenUsageBreakdown
       turnId?: string
       sessionId?: string
     }
@@ -399,6 +404,10 @@ export type UiMessage =
       status: 'running' | 'done' | 'error'
       createdAt: string
       result?: string
+      /** Generated image payload returned by an image tool, when present. */
+      images?: string[]
+      imageModel?: string
+      mime?: string
       model?: string
       /** Renderer-only: segment start epoch ms (live timer). */
       startedAt?: number
