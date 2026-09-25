@@ -5,7 +5,22 @@ import { createServer } from 'vite'
 const server = await createServer({
   configFile: false,
   server: { middlewareMode: true },
-  appType: 'custom'
+  appType: 'custom',
+  plugins: [
+    {
+      name: 'mock-electron-for-agent-harness',
+      enforce: 'pre',
+      resolveId(source) {
+        return source === 'electron' ? '\0electron-agent-test' : undefined
+      },
+      load(id) {
+        return id === '\0electron-agent-test'
+          ? "export const BrowserWindow = { getAllWindows: () => [] }; export const app = { getPath: () => '/tmp/ollama-mcp-agent-test' }"
+          : undefined
+      }
+    }
+  ],
+  ssr: { noExternal: ['electron'] }
 })
 
 const {
@@ -18,6 +33,23 @@ const {
 )
 const { buildAgentImageTools } = await server.ssrLoadModule(
   new URL('../src/main/agent-tool-boundary.ts', import.meta.url).pathname
+)
+const { runAgentTurn } = await server.ssrLoadModule(
+  new URL('../src/main/agent.ts', import.meta.url).pathname
+)
+const { onChatEvent } = await server.ssrLoadModule(
+  new URL('../src/main/chat-events.ts', import.meta.url).pathname
+)
+const {
+  setDefaultImageModel,
+  setOpenaiApiKey,
+  setOpenaiModelEnabled,
+  setOpenaiModelsCatalog,
+  setOllamaBaseUrl,
+  setSelectedModelForProvider,
+  setLlmProvider
+} = await server.ssrLoadModule(
+  new URL('../src/main/config-store.ts', import.meta.url).pathname
 )
 
 after(() => server.close())
@@ -125,4 +157,112 @@ test('a repeated edit can use its previous output as the latest source', () => {
   )
   assert.deepEqual(firstEdit, ['generated'])
   assert.deepEqual(secondEdit, ['edited-output'])
+})
+
+function mockResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return body
+    },
+    async text() {
+      return JSON.stringify(body)
+    }
+  }
+}
+
+function mockChatResponse(toolName) {
+  const payload = JSON.stringify({
+    message: {
+      role: 'assistant',
+      tool_calls: [{ function: { name: toolName, arguments: { prompt: 'make it blue' } } }]
+    },
+    done: true,
+    prompt_eval_count: 3,
+    eval_count: 2
+  })
+  const bytes = new TextEncoder().encode(`${payload}\n`)
+  return {
+    ...mockResponse(null),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes)
+        controller.close()
+      }
+    })
+  }
+}
+
+test('dispatches generation without sources and editing with selected sources', async () => {
+  setLlmProvider('ollama')
+  setSelectedModelForProvider('ollama', 'llama3.2-vision')
+  setOllamaBaseUrl('http://mock-ollama')
+  setOpenaiApiKey('test-key')
+  setOpenaiModelsCatalog([{ id: 'gpt-image-1', name: 'gpt-image-1' }])
+  setOpenaiModelEnabled('gpt-image-1', true)
+  setDefaultImageModel('gpt-image-1')
+
+  const originalFetch = globalThis.fetch
+  const requests = []
+  let nextTool = 'generate_image'
+  globalThis.fetch = async (...args) => {
+    const url = String(args[0])
+    requests.push(args)
+    if (url.endsWith('/api/version')) return mockResponse({ version: '0.1.0' })
+    if (url.endsWith('/api/tags')) return mockResponse({ models: [] })
+    if (url.endsWith('/api/show')) {
+      return mockResponse({ capabilities: ['completion', 'vision'] })
+    }
+    if (url.endsWith('/api/chat')) return mockChatResponse(nextTool)
+    if (url.endsWith('/images/generations')) {
+      return mockResponse({ data: [{ b64_json: 'generated-image' }] })
+    }
+    if (url.endsWith('/images/edits')) {
+      return mockResponse({ data: [{ b64_json: 'edited-image' }] })
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  const events = []
+  const unsubscribe = onChatEvent((event) => events.push(event))
+  const basePayload = {
+    model: 'llama3.2-vision',
+    sessionId: 'task-4-session',
+    messages: [
+      {
+        role: 'user',
+        content: 'make an image',
+        images: [Buffer.alloc(40, 7).toString('base64')]
+      }
+    ]
+  }
+
+  try {
+    await runAgentTurn({ ...basePayload, turnId: 'task-4-generate' })
+    const imageRequest = requests.find(([url]) => String(url).endsWith('/images/generations'))
+    assert.ok(imageRequest)
+    assert.equal(JSON.parse(imageRequest[1].body).images, undefined)
+    assert.equal(events.filter((event) => event.type === 'assistant_images').length, 1)
+    assert.equal(events.at(-1).type, 'done')
+
+    events.length = 0
+    requests.length = 0
+    nextTool = 'edit_image'
+    await runAgentTurn({
+      ...basePayload,
+      turnId: 'task-4-edit',
+      messages: [{ ...basePayload.messages[0], content: 'edit this image' }]
+    })
+    const editRequest = requests.find(([url]) => String(url).endsWith('/images/edits'))
+    assert.ok(editRequest)
+    assert.equal(editRequest[1].body.getAll('image').length, 1)
+    assert.equal(events.filter((event) => event.type === 'assistant_images').length, 1)
+    assert.equal(events.find((event) => event.type === 'tool_start').name, 'edit_image')
+    assert.equal(events.find((event) => event.type === 'tool_result').ok, true)
+    assert.equal(events.at(-1).type, 'done')
+  } finally {
+    unsubscribe()
+    globalThis.fetch = originalFetch
+  }
 })

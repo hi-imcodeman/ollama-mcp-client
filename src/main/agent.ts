@@ -21,10 +21,7 @@ import {
 } from '../shared/contextUsage'
 import { getEffectiveLlmProvider, resolveEffectiveLlmProvider } from './llm'
 import type { LlmChatStreamResult } from './llm/types'
-import {
-  prepareEditImageToolArguments,
-  prepareGenerateImageToolArguments
-} from './agent-image-boundary'
+import { prepareEditImageToolArguments } from './agent-image-boundary'
 import {
   EDIT_IMAGE_NAME,
   GENERATE_IMAGE_NAME,
@@ -772,7 +769,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           })
           const gen = await runGenerateImageTool(
             effective,
-            prepareGenerateImageToolArguments(payload.messages, tc.arguments),
+            { prompt: String(tc.arguments.prompt ?? '') },
             abort.signal
           )
           if (gen.ok) {
