@@ -30,3 +30,9 @@ text-only generation.
 
 The agent-level selection and dispatch remain in the existing agent flow; this
 task's executor accepts the already-selected source images as intended.
+
+## Follow-up fix
+
+The original Task 2 commit hash was corrected to `292d85f`. Follow-up fix
+The follow-up fix commit wires `edit_image` into the agent's exposed tool list
+and dispatch path while leaving latest-generated-image fallback for Task 3.

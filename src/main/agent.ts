@@ -21,13 +21,18 @@ import {
 } from '../shared/contextUsage'
 import { getEffectiveLlmProvider, resolveEffectiveLlmProvider } from './llm'
 import type { LlmChatStreamResult } from './llm/types'
-import { prepareGenerateImageToolArguments } from './agent-image-boundary'
 import {
+  prepareEditImageToolArguments,
+  prepareGenerateImageToolArguments
+} from './agent-image-boundary'
+import {
+  EDIT_IMAGE_NAME,
   GENERATE_IMAGE_NAME,
-  generateImageToolDefinition,
+  runEditImageTool,
   runGenerateImageTool,
   shouldOfferGenerateImageTool
 } from './image-gen-tool'
+import { buildAgentImageTools } from './agent-tool-boundary'
 import { mcpManager } from './mcp-manager'
 import { generateImageBase64 } from './ollama-image'
 import { generateOpenAiImageBase64 } from './openai-image'
@@ -378,7 +383,7 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   const baseTools = [...(skillTool ? [skillTool] : []), ...toolsFromMcp()]
   const offerImageTool = await shouldOfferGenerateImageTool(effective, turnModel)
   const tools = offerImageTool
-    ? [...baseTools, generateImageToolDefinition()]
+    ? buildAgentImageTools(baseTools)
     : baseTools
 
   console.log(
@@ -789,6 +794,48 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
           } else {
             ok = false
             result = gen.message
+          }
+        } else if (tc.name === EDIT_IMAGE_NAME) {
+          emitTurn({
+            type: 'status',
+            phase: 'generating',
+            detail: 'Editing image…'
+          })
+          const edit = await runEditImageTool(
+            effective,
+            String(tc.arguments.prompt ?? ''),
+            prepareEditImageToolArguments(payload.messages),
+            abort.signal
+          )
+          if (edit.ok) {
+            if (abort.signal.aborted || activeTurnId !== turnId) {
+              ok = false
+              result = 'Aborted'
+            } else {
+              emitTurn({
+                type: 'assistant_images',
+                images: [edit.imageBase64],
+                imageModel: edit.model,
+                mime: 'image/png'
+              })
+              ok = true
+              result = edit.message
+              console.log(
+                `[agent] tool end id=${tid} name=${tc.name} ok=${ok} +${ms(toolStartedAt)} resultChars=${result.length}`
+              )
+              emitTurn({
+                type: 'tool_result',
+                id,
+                name: tc.name,
+                ok,
+                result
+              })
+              finish()
+              return
+            }
+          } else {
+            ok = false
+            result = edit.message
           }
         } else {
           ;({ ok, result } = await mcpManager.callTool(tc.name, tc.arguments))

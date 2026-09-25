@@ -8,8 +8,12 @@ const server = await createServer({
   appType: 'custom'
 })
 
-const { prepareGenerateImageToolArguments } = await server.ssrLoadModule(
+const { prepareEditImageToolArguments, prepareGenerateImageToolArguments } =
+  await server.ssrLoadModule(
   new URL('../src/main/agent-image-boundary.ts', import.meta.url).pathname
+)
+const { buildAgentImageTools } = await server.ssrLoadModule(
+  new URL('../src/main/agent-tool-boundary.ts', import.meta.url).pathname
 )
 
 after(() => server.close())
@@ -30,22 +34,40 @@ test('passes only latest user-turn attachments through the production boundary',
 
   assert.deepEqual(result, {
     prompt: 'combine these',
-    images: ['model-image', 'current-image', 'second-current-image']
+    images: ['current-image', 'second-current-image']
   })
 })
 
-test('injects latest user-turn attachments when model images are malformed', () => {
+test('ignores malformed model images when current attachments exist', () => {
   const result = prepareGenerateImageToolArguments(
     [
       { role: 'user', content: 'earlier turn', images: ['earlier-image'] },
       { role: 'assistant', content: 'earlier response' },
       { role: 'user', content: 'edit this', images: ['first-current-image', 'second-current-image'] }
     ],
-    { prompt: 'edit this', images: 'not-an-array' },
+    { prompt: 'edit this', images: [null, 'not-valid-image-data'] },
   )
 
   assert.deepEqual(result, {
     prompt: 'edit this',
     images: ['first-current-image', 'second-current-image']
   })
+})
+
+test('exposes both image tools at the agent boundary', () => {
+  const tools = buildAgentImageTools([])
+  assert.deepEqual(
+    tools.map((tool) => tool.function.name),
+    ['generate_image', 'edit_image']
+  )
+})
+
+test('passes current attachments as internal edit sources', () => {
+  const result = prepareEditImageToolArguments([
+    { role: 'user', content: 'earlier', images: ['old-image'] },
+    { role: 'assistant', content: 'response' },
+    { role: 'user', content: 'edit this', images: ['current-image'] }
+  ])
+
+  assert.deepEqual(result, ['current-image'])
 })

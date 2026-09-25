@@ -13,9 +13,17 @@ export function prepareGenerateImageToolArguments(
 
   if (currentTurnImages.length === 0) return args
 
-  const modelImages = Array.isArray(args.images) ? args.images : []
   return {
     ...args,
-    images: [...new Set([...modelImages, ...currentTurnImages])]
+    images: [...new Set(currentTurnImages)]
   }
+}
+
+export function prepareEditImageToolArguments(messages: ChatMessage[]): string[] {
+  const currentUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === 'user')
+  return Array.isArray(currentUserMessage?.images)
+    ? [...new Set(currentUserMessage.images)]
+    : []
 }
