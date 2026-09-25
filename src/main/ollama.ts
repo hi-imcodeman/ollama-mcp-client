@@ -33,6 +33,8 @@ export interface OllamaChatMessage {
   role: string
   content: string
   images?: string[]
+  /** MIME types aligned with images for providers that need data URLs. */
+  imageMimes?: string[]
   tool_calls?: OllamaToolCall[]
   tool_name?: string
   /** OpenAI tool result correlation; ignored by Ollama. */
@@ -685,6 +687,9 @@ export function toOllamaMessages(messages: ChatMessage[]): OllamaChatMessage[] {
     }
     if (m.images?.length) {
       out.images = m.images
+      if (m.imageMimes?.length) {
+        out.imageMimes = m.imageMimes
+      }
     }
     if (m.tool_calls?.length) {
       out.tool_calls = m.tool_calls.map((tc) => ({

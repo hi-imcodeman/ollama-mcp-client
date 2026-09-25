@@ -51,6 +51,7 @@ interface ChatProps {
   onSend: (payload: {
     content: string
     images?: string[]
+    imageMimes?: string[]
     displayImages?: string[]
     attachmentLabels?: string[]
     invokedSkill?: string
@@ -482,6 +483,7 @@ export function Chat({
     onSend({
       content: built.content,
       images: built.images,
+      imageMimes: built.imageMimes,
       displayImages: built.displayImages,
       attachmentLabels: built.labels,
       invokedSkill: invoked.skillName

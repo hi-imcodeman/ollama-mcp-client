@@ -1038,6 +1038,7 @@ export default function App(): React.JSX.Element {
   const handleSend = async (payload: {
     content: string
     images?: string[]
+    imageMimes?: string[]
     displayImages?: string[]
     attachmentLabels?: string[]
     invokedSkill?: string
@@ -1055,7 +1056,8 @@ export default function App(): React.JSX.Element {
     const userMsg: ChatMessage = {
       role: 'user',
       content: payload.content,
-      images: payload.images
+      images: payload.images,
+      imageMimes: payload.imageMimes
     }
     const nextHistory = [...historyRef.current, userMsg]
     historyRef.current = nextHistory

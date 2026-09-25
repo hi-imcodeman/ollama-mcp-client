@@ -48,3 +48,23 @@ concern for this task.
 
 No live provider or Telegram API calls were made; image tests use mocked
 responses.
+
+## Final MIME defect
+
+- Added optional image MIME metadata to the internal Ollama message shape.
+- Propagated renderer attachment MIME metadata through `ChatMessage` and
+  `toOllamaMessages`.
+- OpenAI chat conversion now uses the aligned MIME for each raw image,
+  while legacy images still default to `image/png` and Ollama receives raw
+  image bytes unchanged.
+- Added `scripts/test-openai-message-mime.mjs` covering JPEG and PNG data URLs.
+
+Final verification:
+
+- `node scripts/test-openai-message-mime.mjs` — passed (2/2)
+- `node scripts/test-agent-image-attachments.mjs` — passed
+- `node scripts/test-openai-image-edit.mjs` — passed
+- `node scripts/check-openai-vision.mjs` — passed
+- `npm run typecheck` — passed
+- `npm run build` — passed
+- `git diff --check` — passed

@@ -183,8 +183,9 @@ export function ollamaMessagesToOpenAi(messages: OllamaChatMessage[]): OpenAiCha
     const parts: OpenAiContentPart[] = []
     if (m.content) parts.push({ type: 'text', text: m.content })
     if (m.images?.length) {
-      for (const img of m.images) {
-        const url = img.startsWith('data:') ? img : `data:image/png;base64,${img}`
+      for (const [index, img] of m.images.entries()) {
+        const mime = m.imageMimes?.[index] ?? 'image/png'
+        const url = img.startsWith('data:') ? img : `data:${mime};base64,${img}`
         parts.push({ type: 'image_url', image_url: { url } })
       }
     }
