@@ -1028,6 +1028,7 @@ export default function App(): React.JSX.Element {
   const handleSend = async (payload: {
     content: string
     images?: string[]
+    displayImages?: string[]
     attachmentLabels?: string[]
     invokedSkill?: string
   }): Promise<void> => {
@@ -1058,10 +1059,6 @@ export default function App(): React.JSX.Element {
             ? payload.content
             : `Sent ${payload.attachmentLabels.length} file(s)`
           : payload.content
-    const displayImages = payload.images?.map((image) =>
-      image.startsWith('data:') ? image : `data:image/png;base64,${image}`
-    )
-
     const nextMessages: UiMessage[] = [
       ...messagesRef.current,
       {
@@ -1070,7 +1067,7 @@ export default function App(): React.JSX.Element {
         content: uiContent,
         createdAt: nowIso(),
         attachmentLabels: payload.attachmentLabels,
-        images: displayImages,
+        images: payload.displayImages,
         model: selectedModel,
         ...(willQueue ? { queueStatus: 'queued' as const } : {})
       }
