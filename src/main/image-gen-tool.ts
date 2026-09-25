@@ -6,7 +6,10 @@ import {
 import { isOpenAiImageGenModel } from '../shared/openai-models'
 import type { LlmProvider } from '../shared/types'
 import { generateImageBase64 } from './ollama-image'
-import { generateOpenAiImageBase64 } from './openai-image'
+import {
+  editOpenAiImageBase64,
+  generateOpenAiImageBase64
+} from './openai-image'
 import {
   getOllamaStatus,
   listModels,
@@ -167,13 +170,18 @@ export function generateImageToolDefinition(): OllamaTool {
     function: {
       name: GENERATE_IMAGE_NAME,
       description:
-        'Generate an actual image from a text prompt using the configured image model. Use this only when the user wants an image created or generated. Do not use it for writing image prompts, describing scenes, or suggesting image ideas.',
+        'Generate an actual image from a text prompt, or edit supplied source images, using the configured image model. Use this only when the user wants an image created or edited. Do not use it for writing image prompts, describing scenes, or suggesting image ideas.',
       parameters: {
         type: 'object',
         properties: {
           prompt: {
             type: 'string',
             description: 'Full image-generation prompt'
+          },
+          images: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional source images as base64 payloads for editing'
           }
         },
         required: ['prompt']
@@ -196,6 +204,17 @@ export async function runGenerateImageTool(
     return { ok: false, message: 'Missing required argument: prompt' }
   }
 
+  let images: string[] | undefined
+  if (args.images !== undefined) {
+    if (
+      !Array.isArray(args.images) ||
+      args.images.some((image) => typeof image !== 'string' || image.length === 0)
+    ) {
+      return { ok: false, message: 'Source images must be non-empty strings' }
+    }
+    images = [...new Set(args.images)]
+  }
+
   try {
     const backend = resolveImageBackend(
       getDefaultImageModel(),
@@ -209,9 +228,19 @@ export async function runGenerateImageTool(
       }
     }
 
+    if (images && images.length > 0 && backend.provider === 'ollama') {
+      return {
+        ok: false,
+        message:
+          'Image editing requires an OpenAI image model. Select an OpenAI image model and try again.'
+      }
+    }
+
     const imageBase64 =
       backend.provider === 'openai'
-        ? (await generateOpenAiImageBase64(backend.model, prompt, signal)).b64
+        ? (await (images && images.length > 0
+            ? editOpenAiImageBase64(backend.model, prompt, images, signal)
+            : generateOpenAiImageBase64(backend.model, prompt, signal))).b64
         : await generateImageBase64(backend.model, prompt, signal)
     return {
       ok: true,
