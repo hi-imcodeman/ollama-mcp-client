@@ -8,7 +8,9 @@ import type { LlmProvider } from '../shared/types'
 import { generateImageBase64 } from './ollama-image'
 import {
   editOpenAiImageBase64,
-  generateOpenAiImageBase64
+  generateOpenAiImageBase64,
+  type OpenAiImageGenerateResult,
+  type OpenAiImageSource
 } from './openai-image'
 import {
   getOllamaStatus,
@@ -186,7 +188,13 @@ export function editImageToolDefinition(): OllamaTool {
 }
 
 export type GenerateImageToolResult =
-  | { ok: true; model: string; imageBase64: string; message: string }
+  | {
+      ok: true
+      model: string
+      imageBase64: string
+      message: string
+      usage?: OpenAiImageGenerateResult['usage']
+    }
   | { ok: false; message: string }
 
 export async function runGenerateImageTool(
@@ -213,15 +221,16 @@ export async function runGenerateImageTool(
       }
     }
 
-    const imageBase64 =
+    const generated =
       backend.provider === 'openai'
-        ? (await generateOpenAiImageBase64(backend.model, prompt, signal)).b64
-        : await generateImageBase64(backend.model, prompt, signal)
+        ? await generateOpenAiImageBase64(backend.model, prompt, signal)
+        : { b64: await generateImageBase64(backend.model, prompt, signal) }
     return {
       ok: true,
       model: backend.model,
-      imageBase64,
-      message: `Generated image with ${backend.model} via ${backend.provider}`
+      imageBase64: generated.b64,
+      message: `Generated image with ${backend.model} via ${backend.provider}`,
+      ...(generated.usage ? { usage: generated.usage } : {})
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -232,7 +241,7 @@ export async function runGenerateImageTool(
 export async function runEditImageTool(
   provider: LlmProvider,
   prompt: string,
-  images: string[],
+  images: Array<string | OpenAiImageSource>,
   signal?: AbortSignal
 ): Promise<GenerateImageToolResult> {
   const normalizedPrompt = prompt.trim()
@@ -241,11 +250,21 @@ export async function runEditImageTool(
   }
   if (
     !Array.isArray(images) ||
-    images.some((image) => typeof image !== 'string' || image.length === 0)
+    images.some((image) => {
+      const base64 = typeof image === 'string' ? image : image?.base64
+      return typeof base64 !== 'string' || base64.length === 0
+    })
   ) {
     return { ok: false, message: 'Source images must be non-empty strings' }
   }
-  const selectedImages = [...new Set(images)]
+  const selectedImages = images.filter((image, index) =>
+    images.findIndex((candidate) =>
+      typeof candidate === 'string' && typeof image === 'string'
+        ? candidate === image
+        : (typeof candidate === 'string' ? candidate : candidate.base64) ===
+          (typeof image === 'string' ? image : image.base64)
+    ) === index
+  )
   if (selectedImages.length === 0) {
     return {
       ok: false,
@@ -284,7 +303,8 @@ export async function runEditImageTool(
       ok: true,
       model: backend.model,
       imageBase64: result.b64,
-      message: `Edited image with ${backend.model} via ${backend.provider}`
+      message: `Edited image with ${backend.model} via ${backend.provider}`,
+      ...(result.usage ? { usage: result.usage } : {})
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

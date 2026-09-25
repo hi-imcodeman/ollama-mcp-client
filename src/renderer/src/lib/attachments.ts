@@ -150,6 +150,7 @@ export function buildMessageFromAttachments(
 ): {
   content: string
   images?: string[]
+  imageMimes?: string[]
   displayImages?: string[]
   labels: string[]
 } {
@@ -158,6 +159,7 @@ export function buildMessageFromAttachments(
   if (trimmed) parts.push(trimmed)
 
   const images: string[] = []
+  const imageMimes: string[] = []
   const displayImages: string[] = []
   const labels: string[] = []
 
@@ -165,6 +167,7 @@ export function buildMessageFromAttachments(
     labels.push(file.name)
     if (file.kind === 'image' && file.imageBase64) {
       images.push(file.imageBase64)
+      imageMimes.push(file.mime)
       if (file.previewUrl) displayImages.push(file.previewUrl)
       continue
     }
@@ -181,6 +184,7 @@ export function buildMessageFromAttachments(
   return {
     content,
     images: images.length ? images : undefined,
+    imageMimes: images.length ? imageMimes : undefined,
     displayImages: displayImages.length ? displayImages : undefined,
     labels
   }

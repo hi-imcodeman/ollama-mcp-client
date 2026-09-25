@@ -60,6 +60,9 @@ test('sends one image as a multipart OpenAI edit request', async () => {
     assert.equal(request.body.get('prompt'), 'make it blue')
     assert.equal(request.body.get('n'), '1')
     assert.equal(request.body.getAll('image').length, 1)
+    const image = request.body.get('image')
+    assert.equal(image.type, 'image/png')
+    assert.equal(image.name, 'image.png')
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -82,10 +85,36 @@ test('sends multiple source images as ordered multipart image parts', async () =
     assert.equal(result.b64, 'combined-image')
     const images = request.body.getAll('image')
     assert.equal(images.length, 2)
+    assert.deepEqual(images.map((image) => [image.type, image.name]), [
+      ['image/png', 'image.png'],
+      ['image/png', 'image.png']
+    ])
     assert.deepEqual(
       await Promise.all(images.map((image) => image.arrayBuffer().then((bytes) => Buffer.from(bytes).toString()))),
       ['first', 'second']
     )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('preserves source MIME metadata and data URLs for multipart uploads', async () => {
+  setOpenaiApiKey('test-key')
+  const originalFetch = globalThis.fetch
+  let request
+  globalThis.fetch = async (...args) => {
+    request = args[1]
+    return mockResponse({ data: [{ b64_json: 'edited-image' }] })
+  }
+
+  try {
+    await editOpenAiImageBase64('gpt-image-1', 'edit', [
+      { base64: 'data:image/jpeg;base64,aW1hZ2U=', mime: 'image/jpeg' }
+    ])
+    const image = request.body.get('image')
+    assert.equal(image.type, 'image/jpeg')
+    assert.equal(image.name, 'image.jpg')
+    assert.equal(Buffer.from(await image.arrayBuffer()).toString(), 'image')
   } finally {
     globalThis.fetch = originalFetch
   }

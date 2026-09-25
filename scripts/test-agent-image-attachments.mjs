@@ -108,6 +108,18 @@ test('passes current attachments as internal edit sources', () => {
   assert.deepEqual(result, ['current-image'])
 })
 
+test('passes renderer MIME metadata with current edit attachments', () => {
+  const result = prepareEditImageToolArguments([
+    {
+      role: 'user',
+      content: 'edit this',
+      images: ['jpeg-image'],
+      imageMimes: ['image/jpeg']
+    }
+  ])
+  assert.deepEqual(result, [{ base64: 'jpeg-image', mime: 'image/jpeg' }])
+})
+
 test('current uploads override the latest generated image', () => {
   assert.deepEqual(
     selectEditImageSources(
@@ -219,7 +231,10 @@ test('dispatches generation without sources and editing with selected sources', 
       return mockResponse({ data: [{ b64_json: 'generated-image' }] })
     }
     if (url.endsWith('/images/edits')) {
-      return mockResponse({ data: [{ b64_json: 'edited-image' }] })
+      return mockResponse({
+        data: [{ b64_json: 'edited-image' }],
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }
+      })
     }
     throw new Error(`Unexpected fetch: ${url}`)
   }
@@ -258,6 +273,14 @@ test('dispatches generation without sources and editing with selected sources', 
     assert.ok(editRequest)
     assert.equal(editRequest[1].body.getAll('image').length, 1)
     assert.equal(events.filter((event) => event.type === 'assistant_images').length, 1)
+    assert.deepEqual(events.find((event) => event.type === 'assistant_images').tokenUsage, {
+      provider: 'openai',
+      promptTokens: 11,
+      completionTokens: 7,
+      totalTokens: 18,
+      cachedPromptTokens: 0,
+      reasoningTokens: 0
+    })
     assert.equal(events.find((event) => event.type === 'tool_start').name, 'edit_image')
     assert.equal(events.find((event) => event.type === 'tool_result').ok, true)
     assert.equal(events.at(-1).type, 'done')

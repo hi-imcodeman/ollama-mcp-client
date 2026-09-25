@@ -215,6 +215,8 @@ export interface ChatMessage {
   content: string
   /** Raw base64 image payloads for Ollama vision models (no data-URL prefix). */
   images?: string[]
+  /** MIME types aligned with images; omitted for legacy raw payloads. */
+  imageMimes?: string[]
   tool_calls?: ChatToolCall[]
   tool_name?: string
 }

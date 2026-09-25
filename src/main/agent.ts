@@ -81,12 +81,24 @@ let activeAbort: AbortController | null = null
 let activeTurnId: string | null = null
 const latestGeneratedImageBySession = new Map<string, string>()
 
+export function clearLatestGeneratedImage(sessionId: string): void {
+  latestGeneratedImageBySession.delete(sessionId)
+}
+
 function latestGeneratedImage(sessionId: string): string | undefined {
   return latestGeneratedImageBySession.get(sessionId)
 }
 
 function rememberGeneratedImage(sessionId: string, imageBase64: string): void {
   latestGeneratedImageBySession.set(sessionId, imageBase64)
+}
+
+function imageTokenUsage(
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number; cachedPromptTokens?: number; reasoningTokens?: number } | undefined
+): TokenUsageBreakdown | undefined {
+  if (!usage) return undefined
+  const tokenUsage = mergeTokenUsage(emptyTokenUsage('openai'), usage)
+  return hasTokenUsageData(tokenUsage) ? tokenUsage : undefined
 }
 
 function emit(event: ChatEvent): void {
@@ -777,11 +789,16 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
               ok = false
               result = 'Aborted'
             } else {
+              const tokenUsage = imageTokenUsage(gen.usage)
+              if (tokenUsage) turnUsage = mergeTokenUsage(turnUsage, tokenUsage)
               emitTurn({
                 type: 'assistant_images',
                 images: [gen.imageBase64],
                 imageModel: gen.model,
-                mime: 'image/png'
+                mime: 'image/png',
+                tokenUsage,
+                contextUsed: tokenUsage?.totalTokens,
+                contextLimit: contextLimit ?? undefined
               })
               rememberGeneratedImage(payload.sessionId, gen.imageBase64)
               ok = true
@@ -823,11 +840,16 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
               ok = false
               result = 'Aborted'
             } else {
+              const tokenUsage = imageTokenUsage(edit.usage)
+              if (tokenUsage) turnUsage = mergeTokenUsage(turnUsage, tokenUsage)
               emitTurn({
                 type: 'assistant_images',
                 images: [edit.imageBase64],
                 imageModel: edit.model,
-                mime: 'image/png'
+                mime: 'image/png',
+                tokenUsage,
+                contextUsed: tokenUsage?.totalTokens,
+                contextLimit: contextLimit ?? undefined
               })
               rememberGeneratedImage(payload.sessionId, edit.imageBase64)
               ok = true

@@ -7,6 +7,11 @@ export interface OpenAiImageGenerateResult {
   usage?: OpenAiUsageDetails
 }
 
+export interface OpenAiImageSource {
+  base64: string
+  mime?: string
+}
+
 function normalizeBase64(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value) return undefined
   const match = value.match(/^data:image\/[^;]+;base64,(.+)$/)
@@ -105,7 +110,7 @@ async function openAiImagesGenerate(
 export async function editOpenAiImageBase64(
   model: string,
   prompt: string,
-  images: string[],
+  images: Array<string | OpenAiImageSource>,
   signal?: AbortSignal
 ): Promise<OpenAiImageGenerateResult> {
   const apiKey = getOpenaiApiKey()
@@ -118,16 +123,24 @@ export async function editOpenAiImageBase64(
   form.append('model', model)
   form.append('prompt', prompt)
   form.append('n', '1')
-  for (const image of images) {
-    if (typeof image !== 'string' || !image) {
+  for (const source of images) {
+    const image = typeof source === 'string' ? source : source?.base64
+    if (!image) {
       throw new Error('Source images must be non-empty base64 payloads')
     }
-    const bytes = decodeRawBase64Image(image)
+    const dataUrl = image.match(/^data:(image\/[^;]+);base64,(.+)$/)
+    const rawBase64 = dataUrl?.[2] ?? image
+    const mime = (typeof source === 'string' ? undefined : source.mime) ??
+      dataUrl?.[1] ??
+      'image/png'
+    const safeMime = /^image\/[a-z0-9.+-]+$/i.test(mime) ? mime : 'image/png'
+    const extension = safeMime === 'image/jpeg' ? 'jpg' : safeMime.slice('image/'.length)
+    const bytes = decodeRawBase64Image(rawBase64)
     const imageBytes = bytes.buffer.slice(
       bytes.byteOffset,
       bytes.byteOffset + bytes.byteLength
     ) as ArrayBuffer
-    form.append('image', new Blob([imageBytes], { type: 'image/png' }), 'image.png')
+    form.append('image', new Blob([imageBytes], { type: safeMime }), `image.${extension}`)
   }
 
   const res = await fetch(`${OPENAI_BASE}/images/edits`, {

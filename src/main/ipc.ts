@@ -18,6 +18,7 @@ import {
   getQueueState,
   removeSessionTurns
 } from './chat-queue'
+import { clearLatestGeneratedImage } from './agent'
 import {
   createSession,
   createScheduleRecord,
@@ -311,6 +312,7 @@ export function registerIpc(ipcMain: IpcMain): void {
   )
   ipcMain.handle('sessions:delete', (_e, id: string) => {
     removeSessionTurns(id)
+    clearLatestGeneratedImage(id)
     const state = deleteSession(id)
     broadcastSessionsChanged()
     return state
