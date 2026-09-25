@@ -9,6 +9,9 @@ const server = await createServer({
 })
 
 const {
+  EDIT_IMAGE_NAME,
+  GENERATE_IMAGE_NAME,
+  editImageToolDefinition,
   generateImageToolDefinition,
   runGenerateImageTool,
   shouldOfferGenerateImageTool
@@ -39,14 +42,22 @@ function response(body, status = 200) {
   }
 }
 
-test('defines an optional images array while keeping prompt required', () => {
-  const parameters = generateImageToolDefinition().function.parameters
-  assert.deepEqual(parameters.required, ['prompt'])
-  assert.deepEqual(parameters.properties.images, {
-    type: 'array',
-    items: { type: 'string' },
-    description: 'Optional source images as base64 payloads for editing'
-  })
+test('defines distinct prompt-only generation and editing tools', () => {
+  const generate = generateImageToolDefinition().function
+  const edit = editImageToolDefinition().function
+
+  assert.equal(GENERATE_IMAGE_NAME, 'generate_image')
+  assert.equal(EDIT_IMAGE_NAME, 'edit_image')
+  assert.equal(generate.name, GENERATE_IMAGE_NAME)
+  assert.equal(edit.name, EDIT_IMAGE_NAME)
+  for (const definition of [generate, edit]) {
+    assert.deepEqual(definition.parameters.required, ['prompt'])
+    assert.deepEqual(Object.keys(definition.parameters.properties), ['prompt'])
+  }
+  assert.match(generate.description, /generate/i)
+  assert.match(generate.description, /text prompt/i)
+  assert.match(edit.description, /edit/i)
+  assert.match(edit.description, /source image/i)
 })
 
 test('routes deduplicated source images to OpenAI editing', async () => {

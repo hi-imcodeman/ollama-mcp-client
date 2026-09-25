@@ -18,6 +18,7 @@ import {
 } from './ollama'
 
 export const GENERATE_IMAGE_NAME = 'generate_image'
+export const EDIT_IMAGE_NAME = 'edit_image'
 
 /** Pure: pick configured model if still in list, else first, else null. */
 export function resolveDefaultImageModel(
@@ -148,18 +149,34 @@ export function generateImageToolDefinition(): OllamaTool {
     function: {
       name: GENERATE_IMAGE_NAME,
       description:
-        'Generate an actual image from a text prompt, or edit supplied source images, using the configured image model. Use this only when the user wants an image created or edited. Do not use it for writing image prompts, describing scenes, or suggesting image ideas.',
+        'Generate an actual image from a text prompt using the configured image model. Use this only when the user wants a new image created. Do not use it for editing source images, writing image prompts, describing scenes, or suggesting image ideas.',
       parameters: {
         type: 'object',
         properties: {
           prompt: {
             type: 'string',
             description: 'Full image-generation prompt'
-          },
-          images: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Optional source images as base64 payloads for editing'
+          }
+        },
+        required: ['prompt']
+      }
+    }
+  }
+}
+
+export function editImageToolDefinition(): OllamaTool {
+  return {
+    type: 'function',
+    function: {
+      name: EDIT_IMAGE_NAME,
+      description:
+        'Edit a supplied source image according to a text prompt using the configured image model. Use this only when the user wants an existing image changed, not when creating a new image from scratch.',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description: 'Full image-editing prompt'
           }
         },
         required: ['prompt']
