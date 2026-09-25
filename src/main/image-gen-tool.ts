@@ -199,17 +199,6 @@ export async function runGenerateImageTool(
     return { ok: false, message: 'Missing required argument: prompt' }
   }
 
-  let images: string[] | undefined
-  if (args.images !== undefined) {
-    if (
-      !Array.isArray(args.images) ||
-      args.images.some((image) => typeof image !== 'string' || image.length === 0)
-    ) {
-      return { ok: false, message: 'Source images must be non-empty strings' }
-    }
-    images = [...new Set(args.images)]
-  }
-
   try {
     const backend = resolveImageBackend(
       getDefaultImageModel(),
@@ -224,7 +213,57 @@ export async function runGenerateImageTool(
       }
     }
 
-    if (images && images.length > 0 && backend.provider === 'ollama') {
+    const imageBase64 =
+      backend.provider === 'openai'
+        ? (await generateOpenAiImageBase64(backend.model, prompt, signal)).b64
+        : await generateImageBase64(backend.model, prompt, signal)
+    return {
+      ok: true,
+      model: backend.model,
+      imageBase64,
+      message: `Generated image with ${backend.model} via ${backend.provider}`
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, message }
+  }
+}
+
+export async function runEditImageTool(
+  provider: LlmProvider,
+  prompt: string,
+  images: string[],
+  signal?: AbortSignal
+): Promise<GenerateImageToolResult> {
+  const normalizedPrompt = prompt.trim()
+  if (!normalizedPrompt) {
+    return { ok: false, message: 'Missing required argument: prompt' }
+  }
+  if (
+    !Array.isArray(images) ||
+    images.some((image) => typeof image !== 'string' || image.length === 0)
+  ) {
+    return { ok: false, message: 'Source images must be non-empty strings' }
+  }
+  const selectedImages = [...new Set(images)]
+  if (selectedImages.length === 0) {
+    return { ok: false, message: 'At least one source image is required for image editing' }
+  }
+
+  try {
+    const backend = resolveImageBackend(
+      getDefaultImageModel(),
+      await listAvailableImageModels(),
+      provider
+    )
+    if (!backend) {
+      return {
+        ok: false,
+        message:
+          'No image models installed. Install an image model to edit images.'
+      }
+    }
+    if (backend.provider === 'ollama') {
       return {
         ok: false,
         message:
@@ -232,17 +271,17 @@ export async function runGenerateImageTool(
       }
     }
 
-    const imageBase64 =
-      backend.provider === 'openai'
-        ? (await (images && images.length > 0
-            ? editOpenAiImageBase64(backend.model, prompt, images, signal)
-            : generateOpenAiImageBase64(backend.model, prompt, signal))).b64
-        : await generateImageBase64(backend.model, prompt, signal)
+    const result = await editOpenAiImageBase64(
+      backend.model,
+      normalizedPrompt,
+      selectedImages,
+      signal
+    )
     return {
       ok: true,
       model: backend.model,
-      imageBase64,
-      message: `Generated image with ${backend.model} via ${backend.provider}`
+      imageBase64: result.b64,
+      message: `Edited image with ${backend.model} via ${backend.provider}`
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

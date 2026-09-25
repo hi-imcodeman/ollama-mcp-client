@@ -13,6 +13,7 @@ const {
   GENERATE_IMAGE_NAME,
   editImageToolDefinition,
   generateImageToolDefinition,
+  runEditImageTool,
   runGenerateImageTool,
   shouldOfferGenerateImageTool
 } =
@@ -60,7 +61,7 @@ test('defines distinct prompt-only generation and editing tools', () => {
   assert.match(edit.description, /source image/i)
 })
 
-test('routes deduplicated source images to OpenAI editing', async () => {
+test('routes selected source images to OpenAI editing', async () => {
   setOpenaiApiKey('test-key')
   setOpenaiModelsCatalog([{ id: 'gpt-image-1', name: 'gpt-image-1' }])
   setOpenaiModelEnabled('gpt-image-1', true)
@@ -74,15 +75,16 @@ test('routes deduplicated source images to OpenAI editing', async () => {
   }
 
   try {
-    const result = await runGenerateImageTool('openai', {
-      prompt: 'remove the background',
-      images: ['Zmlyc3Q=', 'c2Vjb25k', 'Zmlyc3Q=']
-    })
+    const result = await runEditImageTool('openai', 'remove the background', [
+      'Zmlyc3Q=',
+      'c2Vjb25k',
+      'Zmlyc3Q='
+    ])
     assert.deepEqual(result, {
       ok: true,
       model: 'gpt-image-1',
       imageBase64: 'edited-image',
-      message: 'Generated image with gpt-image-1 via openai'
+      message: 'Edited image with gpt-image-1 via openai'
     })
     const request = calls.at(-1)[1]
     assert.equal(request.body.get('model'), 'gpt-image-1')
@@ -104,10 +106,7 @@ test('routes deduplicated source images to OpenAI editing', async () => {
 
 test('rejects invalid image arguments with a clear failure', async () => {
   for (const images of [null, 'not-an-array', ['']]) {
-    const result = await runGenerateImageTool('openai', {
-      prompt: 'edit this',
-      images
-    })
+    const result = await runEditImageTool('openai', 'edit this', images)
     assert.deepEqual(result, {
       ok: false,
       message: 'Source images must be non-empty strings'
@@ -234,10 +233,7 @@ test('rejects malformed base64 before attempting OpenAI editing', async () => {
   }
 
   try {
-    const result = await runGenerateImageTool('openai', {
-      prompt: 'edit this',
-      images: ['not-valid-base64']
-    })
+    const result = await runEditImageTool('openai', 'edit this', ['not-valid-base64'])
     assert.equal(result.ok, false)
     assert.match(result.message, /valid base64/)
     assert.equal(fetchCalled, false)
@@ -260,15 +256,38 @@ test('rejects image editing on Ollama without text generation', async () => {
   }
 
   try {
-    const result = await runGenerateImageTool('ollama', {
-      prompt: 'edit this',
-      images: ['base64-image']
-    })
+    const result = await runEditImageTool('ollama', 'edit this', ['base64-image'])
     assert.deepEqual(result, {
       ok: false,
       message:
         'Image editing requires an OpenAI image model. Select an OpenAI image model and try again.'
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('keeps generation text-only even when extra images are supplied internally', async () => {
+  setOpenaiApiKey('test-key')
+  setOpenaiModelsCatalog([{ id: 'dall-e-3', name: 'dall-e-3' }])
+  setOpenaiModelEnabled('dall-e-3', true)
+  setDefaultImageModel('dall-e-3')
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (...args) => {
+    calls.push(args)
+    return response({ data: [{ b64_json: 'generated-image' }] })
+  }
+
+  try {
+    const result = await runGenerateImageTool('openai', {
+      prompt: 'a red kite',
+      images: ['aW1hZ2U=']
+    })
+    assert.equal(result.ok, true)
+    assert.ok(
+      calls.some((call) => String(call[0]).endsWith('/images/generations'))
+    )
   } finally {
     globalThis.fetch = originalFetch
   }
