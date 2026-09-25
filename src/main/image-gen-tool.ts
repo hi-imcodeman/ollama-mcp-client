@@ -136,18 +136,8 @@ export async function shouldOfferGenerateImageTool(
   if (isOpenAiImageGenModel(selectedModel)) {
     return false
   }
-  if (provider === 'ollama') {
-    const status = await getOllamaStatus()
-    if (!status.ok || status.imageGenSupported === false) return false
-    try {
-      const models = await listModels()
-      const selected = models.find((m) => m.name === selectedModel)
-      if (modelIsImageGen(selectedModel, { capabilities: selected?.capabilities })) {
-        return false
-      }
-    } catch {
-      return false
-    }
+  if (modelIsImageGen(selectedModel)) {
+    return false
   }
   return (await listAvailableImageModels()).length > 0
 }

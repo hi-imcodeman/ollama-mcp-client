@@ -74,3 +74,27 @@ Re-review verification:
 The focused Vite harnesses again emitted incidental dependency-scan shutdown
 output because the development server is active; all harness assertions passed
 and the commands exited successfully.
+
+## Medium issue fix
+
+Removed the early Ollama status/capability gate from tool availability. The
+selected chat model is still excluded when it is recognized as an image model,
+but availability now comes from the combined image-backend list. This allows
+an Ollama LLM to use an available OpenAI image backend even when Ollama is
+unavailable, while execution continues to resolve and route through the
+configured backend with provider-safe stale-model fallback.
+
+Added regression coverage for Ollama-active plus OpenAI-image-backend with a
+failed Ollama status check.
+
+Final verification:
+
+- `node scripts/test-image-gen-tool.mjs` — passed (11/11)
+- `node scripts/test-openai-image-edit.mjs` — passed (5/5)
+- `node scripts/test-agent-image-attachments.mjs` — passed (2/2)
+- `node scripts/smoke-offline-image-gate.mjs` — passed
+- `node scripts/check-openai-vision.mjs` — passed
+- `npm run typecheck` — passed
+- `npm run build` — passed
+- `git diff --check` — passed
+- IDE lints for changed files — no errors

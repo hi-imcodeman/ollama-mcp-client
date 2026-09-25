@@ -191,6 +191,25 @@ test('routes an OpenAI turn through the configured Ollama image backend', async 
   }
 })
 
+test('offers the tool to Ollama when Ollama is unavailable but OpenAI is the image backend', async () => {
+  setDefaultImageModel('gpt-image-1')
+  setOpenaiModelsCatalog([{ id: 'gpt-image-1', name: 'gpt-image-1' }])
+  setOpenaiModelEnabled('gpt-image-1', true)
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (...args) => {
+    if (String(args[0]).endsWith('/api/tags')) {
+      throw new Error('Ollama unavailable')
+    }
+    return response({ data: [{ b64_json: 'unused' }] })
+  }
+
+  try {
+    assert.equal(await shouldOfferGenerateImageTool('ollama', 'llama3.2'), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('rejects malformed base64 before attempting OpenAI editing', async () => {
   setOpenaiApiKey('test-key')
   setOpenaiModelsCatalog([{ id: 'gpt-image-1', name: 'gpt-image-1' }])
