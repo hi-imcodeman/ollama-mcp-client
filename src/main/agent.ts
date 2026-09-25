@@ -24,6 +24,7 @@ import type { LlmChatStreamResult } from './llm/types'
 import {
   GENERATE_IMAGE_NAME,
   generateImageToolDefinition,
+  mergeGenerateImageToolArguments,
   runGenerateImageTool,
   shouldOfferGenerateImageTool
 } from './image-gen-tool'
@@ -427,6 +428,8 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
   }
 
   const catalog = skillContextSystemMessage(payload.invokedSkill)
+  const currentTurnImages =
+    [...payload.messages].reverse().find((message) => message.role === 'user')?.images ?? []
   const messages: OllamaChatMessage[] = [
     ...(catalog ? [{ role: 'system', content: catalog }] : []),
     ...toOllamaMessages(workingMessages)
@@ -754,7 +757,11 @@ export async function runAgentTurn(payload: ChatSendPayload): Promise<void> {
             phase: 'generating',
             detail: 'Generating image…'
           })
-          const gen = await runGenerateImageTool(effective, tc.arguments, abort.signal)
+          const gen = await runGenerateImageTool(
+            effective,
+            mergeGenerateImageToolArguments(tc.arguments, currentTurnImages),
+            abort.signal
+          )
           if (gen.ok) {
             if (abort.signal.aborted || activeTurnId !== turnId) {
               ok = false
