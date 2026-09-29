@@ -1,6 +1,6 @@
+import { isOpenAiImageGenModel } from '../shared/openai-models'
 import { getOpenaiApiKey } from './config-store'
 import { OPENAI_BASE, formatOpenAiError, parseOpenAiUsageFromJson, type OpenAiUsageDetails } from './openai-client'
-import { isOpenAiImageGenModel } from '../shared/openai-models'
 
 export interface OpenAiImageGenerateResult {
   b64: string

@@ -13,7 +13,6 @@ import {
   openAiChatOnce,
   openAiChatStream
 } from '../openai-client'
-import type { OllamaChatChunk, OllamaChatMessage, OllamaTool } from '../ollama'
 import type { LlmModelInfo, LlmProvider } from './types'
 
 const DEFAULT_CTX = 128_000

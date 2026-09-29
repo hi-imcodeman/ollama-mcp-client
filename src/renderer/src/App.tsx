@@ -439,16 +439,7 @@ export default function App(): React.JSX.Element {
         const list = await window.api.ollama.listModels()
         setOllamaModels(list)
         if (llmProvider === 'ollama') {
-          setModels(list)
-          const names = list.map((m) => m.name)
-          setSelectedModel((current) => {
-            if (current && names.includes(current)) return current
-            const next = names[0] ?? null
-            if (next) {
-              void window.api.setSelectedModelForProvider('ollama', next)
-            }
-            return next
-          })
+          await refreshModelsForProvider('ollama')
         }
       } catch (err) {
         setOllamaModels([])
@@ -457,9 +448,11 @@ export default function App(): React.JSX.Element {
       }
     } else {
       setOllamaModels([])
-      setModels([])
+      if (llmProvider === 'ollama') {
+        setModels([])
+      }
     }
-  }, [llmProvider])
+  }, [llmProvider, refreshModelsForProvider])
 
   useEffect(() => {
     void (async () => {
